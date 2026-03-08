@@ -21,6 +21,9 @@ public class ProfileOrchestrator
     private readonly ApprovalScannerService _approvalService;
     private readonly ContractLabelService _labelService;
     private readonly NftService _nftService;
+    private readonly TransferHistoryService _transferService;
+    private readonly WalletClusteringService _clusteringService;
+    private readonly RevokeRecommendationService _revokeService;
     private readonly ProfileCacheService _cacheService;
     private readonly ILogger<ProfileOrchestrator> _logger;
 
@@ -38,6 +41,9 @@ public class ProfileOrchestrator
         ApprovalScannerService approvalService,
         ContractLabelService labelService,
         NftService nftService,
+        TransferHistoryService transferService,
+        WalletClusteringService clusteringService,
+        RevokeRecommendationService revokeService,
         ProfileCacheService cacheService,
         ILogger<ProfileOrchestrator> logger)
     {
@@ -54,6 +60,9 @@ public class ProfileOrchestrator
         _approvalService = approvalService;
         _labelService = labelService;
         _nftService = nftService;
+        _transferService = transferService;
+        _clusteringService = clusteringService;
+        _revokeService = revokeService;
         _cacheService = cacheService;
         _logger = logger;
     }
@@ -180,6 +189,19 @@ public class ProfileOrchestrator
             // Add NFT value to total if available
             if (profile.Nfts?.EstimatedValueUsd > 0 && totalValueUsd.HasValue)
                 profile.TotalValueUsd = totalValueUsd.Value + profile.Nfts.EstimatedValueUsd.Value;
+
+            // Token transfer history (v1.4)
+            var tokenPrices = tokens
+                .Where(t => t.PriceUsd.HasValue && !t.IsSpam)
+                .ToDictionary(t => t.ContractAddress.ToLowerInvariant(), t => t.PriceUsd!.Value);
+            profile.TransferHistory = await _transferService.GetTransferHistoryAsync(address, chain, tokenPrices);
+
+            // Similar wallet clustering (v1.4)
+            profile.SimilarWallets = await _clusteringService.FindSimilarAsync(
+                address, chain, tier, tokens, profile.TopInteractions, topCounterparties);
+
+            // Revoke recommendations (v1.4)
+            profile.RevokeAdvice = _revokeService.Analyze(profile.ApprovalRisk);
         }
 
         // --- PREMIUM: natural language summary ---

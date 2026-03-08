@@ -69,6 +69,9 @@ public class ContractLabelService
         ["0x000000000000000000000000000000000000dEaD"] = ("Burn Address", "system"),
     };
 
+    public bool IsKnownContract(string address)
+        => KnownContracts.ContainsKey(address);
+
     public (string? Label, string? Category) GetLabel(string address)
     {
         if (KnownContracts.TryGetValue(address, out var info))

@@ -1,4 +1,4 @@
-# Wallet Profiler v1.3 — Design Document
+# Wallet Profiler v1.4 — Design Document
 
 ## 1. Problem Statement
 
@@ -219,5 +219,19 @@ Background webhook subscription system. Agents can subscribe to wallet addresses
 `POST /profile/multi-chain` profiles a wallet across multiple chains (Ethereum, Base, Arbitrum) in parallel and returns an aggregated view with per-chain breakdowns. Total portfolio value is summed across chains. ENS is resolved on Ethereum and propagated. Reuses `ProfileOrchestrator` to avoid code duplication.
 
 ### ProfileOrchestrator Refactor (v1.3)
+
+## 9. v1.4 New Features
+
+### Token Transfer History Timeline
+
+Fetches the last 200 ERC-20 token transfers from Etherscan V2 and builds a timeline analysis. Groups transfers by month, calculates inbound vs outbound flows, and enriches with USD values when prices are available. Gives agents a clear picture of a wallet's recent token activity.
+
+### Similar Wallet Clustering
+
+Analyzes a wallet's top counterparties to find wallets with similar on-chain behavior. Uses Jaccard similarity on token sets — wallets that hold similar tokens are likely in the same community or strategy cohort. Useful for trading agents doing peer analysis.
+
+### Revoke Recommendation Engine
+
+Analyzes existing token approvals and generates prioritized recommendations for which approvals to revoke. Classifies by risk: unlimited approvals to NFT marketplaces (common phishing vector) are high priority, unlimited to trusted DEX routers are medium, and limited approvals to known protocols are low. Agents can use this for security advisory services.
 
 Extracted ~100 lines of inline profile-building logic from `Program.cs` into a reusable `ProfileOrchestrator` service. Now shared by `/profile`, `/profile/batch`, and `/profile/multi-chain`, eliminating triple code duplication and making future features easier to add.

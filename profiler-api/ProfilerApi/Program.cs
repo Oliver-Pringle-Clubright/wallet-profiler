@@ -14,6 +14,8 @@ builder.Services.AddSingleton<PortfolioQualityService>();
 builder.Services.AddSingleton<AcpTrustService>();
 builder.Services.AddSingleton<ContractLabelService>();
 builder.Services.AddSingleton<ApprovalScannerService>();
+builder.Services.AddSingleton<RevokeRecommendationService>();
+builder.Services.AddSingleton<WalletClusteringService>();
 builder.Services.AddScoped<ProfileOrchestrator>();
 builder.Services.AddSingleton<MonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorService>());
@@ -21,6 +23,7 @@ builder.Services.AddHttpClient<TokenService>();
 builder.Services.AddHttpClient<ActivityService>();
 builder.Services.AddHttpClient<PriceService>();
 builder.Services.AddHttpClient<NftService>();
+builder.Services.AddHttpClient<TransferHistoryService>();
 
 var app = builder.Build();
 
@@ -318,7 +321,7 @@ app.MapGet("/tiers", () => Results.Ok(new
     standard = new
     {
         fee = "0.001 ETH",
-        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support" }
+        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support", "Token transfer history timeline", "Similar wallet clustering", "Revoke recommendation engine" }
     },
     premium = new
     {

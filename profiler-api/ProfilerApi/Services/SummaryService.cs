@@ -128,6 +128,34 @@ public class SummaryService
                 parts.Add($"Top interactions: {string.Join(", ", labeled.Select(i => $"{i.Label} ({i.TransactionCount} txs)"))}.");
         }
 
+        // Transfer history
+        if (profile.TransferHistory != null && profile.TransferHistory.TotalTransfers > 0)
+        {
+            var th = profile.TransferHistory;
+            var flowPart = $"{th.TotalTransfers} token transfers ({th.InboundCount} in, {th.OutboundCount} out)";
+            if (th.NetFlowUsd.HasValue)
+                flowPart += th.NetFlowUsd > 0 ? $", net inflow {FormatUsd(th.NetFlowUsd.Value)}" : $", net outflow {FormatUsd(Math.Abs(th.NetFlowUsd.Value))}";
+            parts.Add(flowPart + ".");
+        }
+
+        // Revoke advice
+        if (profile.RevokeAdvice != null && profile.RevokeAdvice.TotalRecommendations > 0)
+        {
+            var ra = profile.RevokeAdvice;
+            var revokePart = $"{ra.TotalRecommendations} approval revocation(s) recommended";
+            if (ra.HighPriority > 0)
+                revokePart += $" ({ra.HighPriority} high priority)";
+            revokePart += $" — urgency: {ra.OverallUrgency}.";
+            parts.Add(revokePart);
+        }
+
+        // Similar wallets
+        if (profile.SimilarWallets != null && profile.SimilarWallets.Matches.Count > 0)
+        {
+            var topMatch = profile.SimilarWallets.Matches.First();
+            parts.Add($"{profile.SimilarWallets.Matches.Count} similar wallet(s) found (top match: {Shorten(topMatch.Address)}, {topMatch.SimilarityScore}% similarity).");
+        }
+
         // Risk
         var riskPart = profile.Risk.Level switch
         {

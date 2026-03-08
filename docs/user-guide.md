@@ -1,4 +1,4 @@
-# Wallet Profiler v1.3 — User Guide
+# Wallet Profiler v1.4 — User Guide
 
 ## Overview
 
@@ -33,6 +33,9 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 | Token approval risk scan | — | Yes | Yes |
 | Contract interaction labels | — | Yes | Yes |
 | NFT holdings & floor prices | — | Yes | Yes |
+| Token transfer history timeline | — | Yes | Yes |
+| Similar wallet clustering | — | Yes | Yes |
+| Revoke recommendation engine | — | Yes | Yes |
 | Natural language summary | — | — | Yes |
 
 ## Getting Started
@@ -299,6 +302,9 @@ curl http://localhost:5000/tiers
 | `approvalRisk` | object? | Std+ | Token approval risk scan results |
 | `topInteractions` | array | Std+ | Top 10 interacted-with contracts with labels |
 | `nfts` | object? | Std+ | NFT holdings summary with floor prices |
+| `transferHistory` | object? | Std+ | Token transfer timeline with flow analysis |
+| `similarWallets` | object? | Std+ | Similar wallets by token overlap |
+| `revokeAdvice` | object? | Std+ | Approval revocation recommendations |
 | `summary` | string? | Premium | Natural language wallet summary |
 
 ### Wallet Tags
@@ -395,6 +401,41 @@ Available on standard and premium tiers. Fetches NFT holdings via Alchemy NFT AP
 | `nfts.estimatedValueUsd` | Estimated total floor value in USD |
 | `nfts.topCollections[]` | Top 10 collections by floor price/count |
 | `nfts.topCollections[].floorPriceEth` | Current floor price in ETH |
+
+### Token Transfer History (v1.4)
+
+Available on standard and premium tiers. Fetches up to 200 recent ERC-20 transfers and provides flow analysis.
+
+| Field | Description |
+|---|---|
+| `transferHistory.totalTransfers` | Total transfers analyzed |
+| `transferHistory.inboundCount` | Number of incoming transfers |
+| `transferHistory.outboundCount` | Number of outgoing transfers |
+| `transferHistory.netFlowUsd` | Net USD flow (positive = inflow) |
+| `transferHistory.recentTransfers[]` | Last 20 transfers with details |
+| `transferHistory.timeline[]` | Monthly breakdown (up to 12 months) |
+
+### Similar Wallet Clustering (v1.4)
+
+Available on standard and premium tiers. Finds wallets with similar token holdings by analyzing counterparty relationships.
+
+| Field | Description |
+|---|---|
+| `similarWallets.candidatesAnalyzed` | Number of counterparties analyzed |
+| `similarWallets.matches[]` | Top 5 similar wallets |
+| `similarWallets.matches[].similarityScore` | Jaccard similarity (0-100) |
+| `similarWallets.matches[].commonTokens` | Shared token symbols |
+
+### Revoke Recommendation Engine (v1.4)
+
+Available on standard and premium tiers. Analyzes token approvals and recommends which to revoke.
+
+| Field | Description |
+|---|---|
+| `revokeAdvice.totalRecommendations` | Number of revocation recommendations |
+| `revokeAdvice.highPriority` | Count of high-priority revocations |
+| `revokeAdvice.overallUrgency` | `none`, `low`, `medium`, or `high` |
+| `revokeAdvice.recommendations[]` | Individual recommendations with priority and reason |
 
 ### Risk Score Interpretation
 

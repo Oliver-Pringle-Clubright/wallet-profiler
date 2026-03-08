@@ -21,6 +21,9 @@ public class WalletProfile
     public ApprovalRisk? ApprovalRisk { get; set; }
     public List<ContractInteraction> TopInteractions { get; set; } = [];
     public NftSummary? Nfts { get; set; }
+    public TransferHistory? TransferHistory { get; set; }
+    public SimilarWallets? SimilarWallets { get; set; }
+    public RevokeRecommendations? RevokeAdvice { get; set; }
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -194,6 +197,77 @@ public class MonitorStatusResponse
 {
     public int ActiveSubscriptions { get; set; }
     public List<MonitorSubscription> Subscriptions { get; set; } = [];
+}
+
+// --- v1.4: Token Transfer History ---
+
+public class TransferHistory
+{
+    public int TotalTransfers { get; set; }
+    public int InboundCount { get; set; }
+    public int OutboundCount { get; set; }
+    public decimal? NetFlowUsd { get; set; }
+    public List<TokenTransfer> RecentTransfers { get; set; } = [];
+    public List<TransferPeriod> Timeline { get; set; } = [];
+}
+
+public class TokenTransfer
+{
+    public string TxHash { get; set; } = string.Empty;
+    public string TokenSymbol { get; set; } = string.Empty;
+    public string TokenAddress { get; set; } = string.Empty;
+    public string Direction { get; set; } = string.Empty; // "in" or "out"
+    public string Counterparty { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public decimal? ValueUsd { get; set; }
+    public DateTime Timestamp { get; set; }
+}
+
+public class TransferPeriod
+{
+    public string Period { get; set; } = string.Empty; // "2026-03", "2026-W10", etc.
+    public int InboundCount { get; set; }
+    public int OutboundCount { get; set; }
+    public decimal? InboundValueUsd { get; set; }
+    public decimal? OutboundValueUsd { get; set; }
+}
+
+// --- v1.4: Similar Wallet Clustering ---
+
+public class SimilarWallets
+{
+    public int CandidatesAnalyzed { get; set; }
+    public List<SimilarWallet> Matches { get; set; } = [];
+}
+
+public class SimilarWallet
+{
+    public string Address { get; set; } = string.Empty;
+    public int SimilarityScore { get; set; } // 0-100
+    public List<string> CommonTokens { get; set; } = [];
+    public List<string> CommonInteractions { get; set; } = [];
+    public int SharedProtocols { get; set; }
+}
+
+// --- v1.4: Revoke Recommendations ---
+
+public class RevokeRecommendations
+{
+    public int TotalRecommendations { get; set; }
+    public int HighPriority { get; set; }
+    public string OverallUrgency { get; set; } = "none"; // none, low, medium, high
+    public List<RevokeRecommendation> Recommendations { get; set; } = [];
+}
+
+public class RevokeRecommendation
+{
+    public string TokenSymbol { get; set; } = string.Empty;
+    public string TokenAddress { get; set; } = string.Empty;
+    public string SpenderAddress { get; set; } = string.Empty;
+    public string SpenderLabel { get; set; } = string.Empty;
+    public string Priority { get; set; } = "low"; // low, medium, high
+    public string Reason { get; set; } = string.Empty;
+    public bool IsUnlimited { get; set; }
 }
 
 // --- v1.3: Cross-Chain Aggregated Profile ---

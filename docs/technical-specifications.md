@@ -1,4 +1,4 @@
-# Wallet Profiler v1.3 — Technical Specifications
+# Wallet Profiler v1.4 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -47,7 +47,10 @@ wallet-profiler/
 │           ├── ProfileCacheService.cs    # In-memory cache with tiered TTLs
 │           ├── NftService.cs             # Alchemy NFT API v3 (v1.3)
 │           ├── ProfileOrchestrator.cs    # Shared profile building logic (v1.3)
-│           └── MonitorService.cs         # Whale movement webhook monitor (v1.3)
+│           ├── MonitorService.cs         # Whale movement webhook monitor (v1.3)
+│           ├── TransferHistoryService.cs # Token transfer timeline (v1.4)
+│           ├── WalletClusteringService.cs # Similar wallet discovery (v1.4)
+│           └── RevokeRecommendationService.cs # Approval revocation advisor (v1.4)
 ├── acp-service/                          # TypeScript ACP proxy
 │   ├── Dockerfile
 │   ├── package.json
@@ -174,6 +177,9 @@ interface WalletProfile {
   approvalRisk: ApprovalRisk | null; // standard+
   topInteractions: ContractInteraction[]; // standard+
   nfts: NftSummary | null;          // standard+
+  transferHistory: TransferHistory | null; // standard+
+  similarWallets: SimilarWallets | null;   // standard+
+  revokeAdvice: RevokeRecommendations | null; // standard+
   summary: string | null;           // premium only
   profiledAt: string;
 }
@@ -302,6 +308,64 @@ interface WalletAlert {
   amountEth: number | null;
   txHash: string | null;
   detectedAt: string;
+}
+
+interface TransferHistory {
+  totalTransfers: number;
+  inboundCount: number;
+  outboundCount: number;
+  netFlowUsd: number | null;
+  recentTransfers: TokenTransfer[];    // last 20 transfers
+  timeline: TransferPeriod[];          // monthly breakdown (last 12 months)
+}
+
+interface TokenTransfer {
+  txHash: string;
+  tokenSymbol: string;
+  tokenAddress: string;
+  direction: string;                   // "in" or "out"
+  counterparty: string;
+  amount: number;
+  valueUsd: number | null;
+  timestamp: string;
+}
+
+interface TransferPeriod {
+  period: string;                      // "2026-03"
+  inboundCount: number;
+  outboundCount: number;
+  inboundValueUsd: number | null;
+  outboundValueUsd: number | null;
+}
+
+interface SimilarWallets {
+  candidatesAnalyzed: number;
+  matches: SimilarWallet[];
+}
+
+interface SimilarWallet {
+  address: string;
+  similarityScore: number;             // 0-100
+  commonTokens: string[];
+  commonInteractions: string[];
+  sharedProtocols: number;
+}
+
+interface RevokeRecommendations {
+  totalRecommendations: number;
+  highPriority: number;
+  overallUrgency: string;              // "none" | "low" | "medium" | "high"
+  recommendations: RevokeRecommendation[];
+}
+
+interface RevokeRecommendation {
+  tokenSymbol: string;
+  tokenAddress: string;
+  spenderAddress: string;
+  spenderLabel: string;
+  priority: string;                    // "low" | "medium" | "high"
+  reason: string;
+  isUnlimited: boolean;
 }
 
 interface BatchProfileResponse {
@@ -510,7 +574,41 @@ Extracts the profile-building logic from Program.cs into a reusable service. Use
 
 **Concurrency:** Up to 10 subscriptions checked in parallel per poll cycle.
 
-### 5.15 Quick Trust Endpoint
+### 5.15 TransferHistoryService (v1.4)
+
+Fetches ERC-20 token transfer events from Etherscan V2 (`action=tokentx`) and builds a transfer timeline with flow analysis.
+
+**Data fetched:** Last 200 token transfers sorted descending.
+
+**Analysis:**
+- Groups transfers into monthly periods (last 12 months)
+- Classifies each transfer as inbound or outbound
+- Calculates net USD flow when token prices are available
+- Returns 20 most recent transfers with full details
+
+### 5.16 WalletClusteringService (v1.4)
+
+Finds wallets with similar on-chain behavior by analyzing the wallet's top counterparties.
+
+**Algorithm:**
+1. Filter top counterparties — exclude known contracts (DEXes, bridges, etc.)
+2. Fetch token balances for each candidate (basic tier, max 5 parallel)
+3. Compute Jaccard similarity coefficient on token sets
+4. Add interaction frequency bonus (0-20 points)
+5. Return top 5 matches with similarity > 5%
+
+### 5.17 RevokeRecommendationService (v1.4)
+
+Analyzes token approvals from ApprovalScannerService and generates prioritized revocation recommendations.
+
+**Priority levels:**
+- **High:** Unlimited approval to NFT marketplace (common phishing vector), unlimited to unknown spender, or flagged high-risk contract
+- **Medium:** Unlimited approval to trusted DEX router (unnecessary for most users)
+- **Low:** Limited approval to known protocol (safe but reclaimable)
+
+**Overall urgency:** Based on count of high-priority recommendations.
+
+### 5.18 Quick Trust Endpoint
 
 Lightweight `GET /trust/{address}` endpoint that scores wallets without full profile analysis.
 
@@ -551,6 +649,9 @@ Lightweight `GET /trust/{address}` endpoint that scores wallets without full pro
   Contract labels  ○               ●               ●
   ACP trust score  ○               ●               ●
   NFT holdings     ○               ●               ●
+  Transfer history ○               ●               ●
+  Similar wallets  ○               ●               ●
+  Revoke advice    ○               ●               ●
   Summary          ○               ○               ●
                    │               │               │
   Response time    ~3s             ~8s             ~8s
