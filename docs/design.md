@@ -1,4 +1,4 @@
-# Wallet Profiler v1.2 — Design Document
+# Wallet Profiler v1.3 — Design Document
 
 ## 1. Problem Statement
 
@@ -188,7 +188,11 @@ Token metadata resolution is the main bottleneck. By capping metadata calls per 
 - **ERC-8004 agent verification** — check if wallet is a registered on-chain agent
 - **Virtuals Agent Token detection** — identify wallets with launched agent tokens
 
-## 7. v1.2 New Features
+## 7. v1.2 Features
+
+(See v1.2 changelog for approval scanner, contract labels, and quick trust endpoint.)
+
+## 8. v1.3 New Features
 
 ### Token Approval Risk Scanner
 
@@ -201,3 +205,19 @@ Labels the wallet's top 10 most-interacted-with addresses using a database of 45
 ### Quick Trust Endpoint
 
 `GET /trust/{address}` — lightweight pre-transaction trust check returning only score + level in ~500ms. Uses 4 parallel RPC calls (balance, tx count, ENS, token count) without full metadata resolution. Designed for high-volume agents doing thousands of pre-transaction checks at a low price point.
+
+### NFT Holdings & Floor Prices (v1.3)
+
+Uses Alchemy NFT API v3 (`getNFTsForOwner`, `getFloorPrice`) to discover ERC-721/1155 holdings, group by collection, and fetch floor prices from OpenSea/LooksRare. Estimated portfolio value includes NFT floor values. Available on standard+ tiers.
+
+### Whale Movement Monitor (v1.3)
+
+Background webhook subscription system. Agents can subscribe to wallet addresses and receive POST alerts when new transactions are detected. Uses `BackgroundService` with 30-second polling interval and `ConcurrentDictionary` for in-memory subscription storage. Endpoints: `POST /monitor`, `GET /monitor`, `DELETE /monitor/{id}`.
+
+### Cross-Chain Aggregated Profile (v1.3)
+
+`POST /profile/multi-chain` profiles a wallet across multiple chains (Ethereum, Base, Arbitrum) in parallel and returns an aggregated view with per-chain breakdowns. Total portfolio value is summed across chains. ENS is resolved on Ethereum and propagated. Reuses `ProfileOrchestrator` to avoid code duplication.
+
+### ProfileOrchestrator Refactor (v1.3)
+
+Extracted ~100 lines of inline profile-building logic from `Program.cs` into a reusable `ProfileOrchestrator` service. Now shared by `/profile`, `/profile/batch`, and `/profile/multi-chain`, eliminating triple code duplication and making future features easier to add.

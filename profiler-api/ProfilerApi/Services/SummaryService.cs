@@ -108,6 +108,18 @@ public class SummaryService
             parts.Add(approvalPart);
         }
 
+        // NFT holdings
+        if (profile.Nfts != null && profile.Nfts.TotalCount > 0)
+        {
+            var nftPart = $"{profile.Nfts.TotalCount} NFT(s) across {profile.Nfts.CollectionCount} collection(s)";
+            if (profile.Nfts.EstimatedValueUsd.HasValue)
+                nftPart += $", estimated floor value {FormatUsd(profile.Nfts.EstimatedValueUsd.Value)}";
+            var topNft = profile.Nfts.TopCollections.FirstOrDefault();
+            if (topNft != null && topNft.FloorPriceEth.HasValue)
+                nftPart += $". Top collection: {topNft.Name} ({topNft.OwnedCount} owned, floor {topNft.FloorPriceEth:F3} ETH)";
+            parts.Add(nftPart + ".");
+        }
+
         // Top interactions
         if (profile.TopInteractions.Count > 0)
         {

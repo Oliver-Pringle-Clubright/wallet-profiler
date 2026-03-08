@@ -1,4 +1,4 @@
-# Wallet Profiler v1.2 — User Guide
+# Wallet Profiler v1.3 — User Guide
 
 ## Overview
 
@@ -32,6 +32,7 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 | ACP trust score | — | Yes | Yes |
 | Token approval risk scan | — | Yes | Yes |
 | Contract interaction labels | — | Yes | Yes |
+| NFT holdings & floor prices | — | Yes | Yes |
 | Natural language summary | — | — | Yes |
 
 ## Getting Started
@@ -157,6 +158,57 @@ Profile up to 50 wallets in a single request. Addresses are processed in paralle
 }
 ```
 
+### Cross-Chain Aggregated Profile (v1.3)
+
+**Endpoint:** `POST /profile/multi-chain`
+
+Profile a wallet across multiple chains in one request. Results are aggregated with per-chain breakdowns.
+
+**Request body:**
+```json
+{
+  "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+  "chains": ["ethereum", "base", "arbitrum"],
+  "tier": "standard"
+}
+```
+
+**Response:**
+```json
+{
+  "address": "0xd8d...045",
+  "ensName": "vitalik.eth",
+  "totalValueUsd": 65432.10,
+  "chainProfiles": {
+    "ethereum": { "ethBalance": 32.13, "topTokens": [...], ... },
+    "base": { "ethBalance": 0.5, "topTokens": [...], ... },
+    "arbitrum": { "ethBalance": 0.01, "topTokens": [...], ... }
+  },
+  "activeChains": ["ethereum", "base"],
+  "profiledAt": "2026-03-08T16:30:00Z"
+}
+```
+
+### Whale Movement Monitor (v1.3)
+
+Subscribe to receive webhook alerts when a wallet has new transactions.
+
+**Subscribe:** `POST /monitor`
+```json
+{
+  "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+  "chain": "ethereum",
+  "webhookUrl": "https://your-agent.com/webhook",
+  "thresholdEth": 10
+}
+```
+
+**Check status:** `GET /monitor`
+
+**Unsubscribe:** `DELETE /monitor/{subscriptionId}`
+
+The monitor checks subscribed wallets every 30 seconds. When new transactions are detected, it sends a POST to your webhook URL with alert details.
+
 ### View Available Tiers
 
 ```bash
@@ -246,6 +298,7 @@ curl http://localhost:5000/tiers
 | `acpTrust` | object? | Std+ | ACP trust score for agent-to-agent commerce |
 | `approvalRisk` | object? | Std+ | Token approval risk scan results |
 | `topInteractions` | array | Std+ | Top 10 interacted-with contracts with labels |
+| `nfts` | object? | Std+ | NFT holdings summary with floor prices |
 | `summary` | string? | Premium | Natural language wallet summary |
 
 ### Wallet Tags
@@ -330,6 +383,19 @@ Available on standard and premium tiers. Labels the wallet's top 10 most-interac
 
 Unlabeled addresses show `label: null` — these are typically personal wallets or unlisted contracts.
 
+### NFT Holdings (v1.3)
+
+Available on standard and premium tiers. Fetches NFT holdings via Alchemy NFT API v3 and floor prices from OpenSea/LooksRare.
+
+| Field | Description |
+|---|---|
+| `nfts.totalCount` | Total NFTs owned |
+| `nfts.collectionCount` | Number of distinct collections |
+| `nfts.estimatedValueEth` | Estimated total floor value in ETH |
+| `nfts.estimatedValueUsd` | Estimated total floor value in USD |
+| `nfts.topCollections[]` | Top 10 collections by floor price/count |
+| `nfts.topCollections[].floorPriceEth` | Current floor price in ETH |
+
 ### Risk Score Interpretation
 
 | Score Range | Level | Meaning |
@@ -395,3 +461,17 @@ See [DEPLOY.md](../DEPLOY.md) for full deployment instructions.
 **Approval scan shows 0 approvals:**
 - The wallet may not have interacted with the checked DEX routers
 - Only the top 10 non-spam tokens are scanned against 7 known spenders
+
+**NFT data is empty or null:**
+- NFTs are only included with `standard` and `premium` tiers
+- Verify your Alchemy API key supports NFT API v3
+- Some wallets may not hold any ERC-721/1155 tokens
+
+**Multi-chain returns empty profiles for some chains:**
+- The wallet may not have activity on that chain
+- Ensure Alchemy supports the requested chain
+
+**Monitor webhook not firing:**
+- Verify the webhook URL is publicly accessible
+- The monitor polls every 30 seconds — alerts are not instant
+- Subscriptions are stored in-memory and do not survive server restarts

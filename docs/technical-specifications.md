@@ -1,4 +1,4 @@
-# Wallet Profiler v1.2 — Technical Specifications
+# Wallet Profiler v1.3 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -44,7 +44,10 @@ wallet-profiler/
 │           ├── ApprovalScannerService.cs # ERC-20 approval risk scanning
 │           ├── ContractLabelService.cs   # Known contract address labeling
 │           ├── SummaryService.cs         # Natural language summary generation
-│           └── ProfileCacheService.cs    # In-memory cache with tiered TTLs
+│           ├── ProfileCacheService.cs    # In-memory cache with tiered TTLs
+│           ├── NftService.cs             # Alchemy NFT API v3 (v1.3)
+│           ├── ProfileOrchestrator.cs    # Shared profile building logic (v1.3)
+│           └── MonitorService.cs         # Whale movement webhook monitor (v1.3)
 ├── acp-service/                          # TypeScript ACP proxy
 │   ├── Dockerfile
 │   ├── package.json
@@ -108,6 +111,39 @@ wallet-profiler/
 
 **Response time:** ~500ms (4 parallel RPC calls, no metadata resolution).
 
+### POST /profile/multi-chain (v1.3)
+
+**Request:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `address` | string | Yes | — | Wallet address (0x...) or ENS name |
+| `chains` | string[] | No | `["ethereum","base","arbitrum"]` | Chains to profile (max 5) |
+| `tier` | string | No | `"standard"` | `basic`, `standard`, or `premium` |
+
+**Response:** `200 OK` — `MultiChainProfile` JSON with per-chain profiles aggregated.
+
+### POST /monitor (v1.3)
+
+Subscribe to wallet movement alerts via webhook.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `address` | string | Yes | — | Wallet address to monitor |
+| `chain` | string | No | `"ethereum"` | Chain to monitor |
+| `webhookUrl` | string | Yes | — | URL to receive alert POSTs |
+| `thresholdEth` | decimal | No | `10` | ETH threshold for alerts |
+
+**Response:** `200 OK` — `MonitorSubscription` JSON with subscription ID.
+
+### GET /monitor (v1.3)
+
+Returns all active monitor subscriptions.
+
+### DELETE /monitor/{id} (v1.3)
+
+Removes a monitor subscription by ID.
+
 ### GET /tiers
 
 Returns the pricing and feature breakdown for all tiers.
@@ -137,6 +173,7 @@ interface WalletProfile {
   acpTrust: AcpTrustScore | null;   // standard+
   approvalRisk: ApprovalRisk | null; // standard+
   topInteractions: ContractInteraction[]; // standard+
+  nfts: NftSummary | null;          // standard+
   summary: string | null;           // premium only
   profiledAt: string;
 }
@@ -220,6 +257,51 @@ interface TrustCheckResponse {
   trustScore: number;           // 0-100
   trustLevel: string;           // "untrusted" | "low" | "moderate" | "high"
   factors: string[];
+}
+
+interface NftSummary {
+  totalCount: number;
+  collectionCount: number;
+  estimatedValueEth: number | null;
+  estimatedValueUsd: number | null;
+  topCollections: NftCollection[];
+}
+
+interface NftCollection {
+  name: string;
+  contractAddress: string;
+  ownedCount: number;
+  floorPriceEth: number | null;
+  floorPriceUsd: number | null;
+}
+
+interface MultiChainProfile {
+  address: string;
+  ensName: string | null;
+  totalValueUsd: number | null;      // sum across all chains
+  chainProfiles: Record<string, WalletProfile>;
+  activeChains: string[];
+  profiledAt: string;
+}
+
+interface MonitorSubscription {
+  id: string;
+  address: string;
+  chain: string;
+  webhookUrl: string;
+  thresholdEth: number;
+  createdAt: string;
+  active: boolean;
+}
+
+interface WalletAlert {
+  subscriptionId: string;
+  address: string;
+  type: string;
+  description: string;
+  amountEth: number | null;
+  txHash: string | null;
+  detectedAt: string;
 }
 
 interface BatchProfileResponse {
@@ -400,7 +482,35 @@ Static dictionary of 45+ known Ethereum mainnet contracts with labels and catego
 
 **Categories:** `dex`, `nft`, `lending`, `bridge`, `staking`, `mixer`, `token`, `governance`, `identity`, `system`.
 
-### 5.12 Quick Trust Endpoint
+### 5.12 NftService (v1.3)
+
+Uses Alchemy NFT API v3 to fetch NFT holdings and floor prices. Available on standard+ tiers.
+
+**NFT Discovery:** `GET /nft/v3/{key}/getNFTsForOwner?owner={address}&withMetadata=true&pageSize=100`
+
+Returns up to 100 NFTs with collection metadata. Groups by collection, counts per collection.
+
+**Floor Prices:** `GET /nft/v3/{key}/getFloorPrice?contractAddress={contract}`
+
+Fetches floor prices from OpenSea and LooksRare for top 10 collections. Runs in parallel with concurrency limit of 5.
+
+**Output:** NftSummary with total count, collection count, estimated floor value (ETH + USD), and top 10 collections.
+
+### 5.13 ProfileOrchestrator (v1.3)
+
+Extracts the profile-building logic from Program.cs into a reusable service. Used by `/profile`, `/profile/batch`, and `/profile/multi-chain` endpoints. Eliminates code duplication across all three endpoints.
+
+### 5.14 MonitorService (v1.3)
+
+`BackgroundService` that polls subscribed wallets every 30 seconds for new transactions. Sends webhook POST alerts when activity is detected.
+
+**Storage:** `ConcurrentDictionary<string, MonitorSubscription>` (in-memory).
+
+**Polling:** Checks tx count via `eth_getTransactionCount`. Compares with last known count. On new transactions, sends alert payload to the subscriber's webhook URL.
+
+**Concurrency:** Up to 10 subscriptions checked in parallel per poll cycle.
+
+### 5.15 Quick Trust Endpoint
 
 Lightweight `GET /trust/{address}` endpoint that scores wallets without full profile analysis.
 
@@ -440,6 +550,7 @@ Lightweight `GET /trust/{address}` endpoint that scores wallets without full pro
   Approval scan    ○               ●               ●
   Contract labels  ○               ●               ●
   ACP trust score  ○               ●               ●
+  NFT holdings     ○               ●               ●
   Summary          ○               ○               ●
                    │               │               │
   Response time    ~3s             ~8s             ~8s
@@ -450,7 +561,7 @@ Lightweight `GET /trust/{address}` endpoint that scores wallets without full pro
 
 | API | Free Tier Limits | Used For |
 |---|---|---|
-| **Alchemy** | 300M compute units/month | RPC, token balances, token metadata, ENS, DeFi reads |
+| **Alchemy** | 300M compute units/month | RPC, token balances, token metadata, ENS, DeFi reads, NFT API v3 |
 | **Etherscan V2** | 5 calls/sec | Transaction history (standard+ only) |
 | **DeFi Llama** | Unlimited (fair use) | ETH + token USD prices |
 
