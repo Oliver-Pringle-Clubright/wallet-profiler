@@ -1,4 +1,4 @@
-# Wallet Profiler v1.5 — Technical Specifications
+# Wallet Profiler v1.6 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -53,7 +53,11 @@ wallet-profiler/
 │           ├── WalletClusteringService.cs # Similar wallet discovery (v1.4)
 │           ├── RevokeRecommendationService.cs # Approval revocation advisor (v1.4)
 │           ├── ApiKeyAuthService.cs      # API key auth + rate limiting (v1.5)
-│           └── SlaTrackingService.cs     # Response time SLA tracking (v1.5)
+│           ├── SlaTrackingService.cs     # Response time SLA tracking (v1.5)
+│           ├── SanctionsService.cs       # OFAC sanctions screening (v1.6)
+│           ├── SmartMoneyService.cs      # Smart money classification (v1.6)
+│           ├── TokenHolderService.cs     # Token holder analysis (v1.6)
+│           └── SnapshotService.cs        # Portfolio snapshot history (v1.6)
 ├── acp-service/                          # TypeScript ACP proxy
 │   ├── Dockerfile
 │   ├── package.json
@@ -150,6 +154,36 @@ Returns all active monitor subscriptions.
 
 Removes a monitor subscription by ID.
 
+### GET /token/{contract}/holders (v1.6)
+
+Analyzes top holders of an ERC-20 token with trust scoring.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `contract` | string (path) | Yes | — | Token contract address |
+| `chain` | string (query) | No | `"ethereum"` | Chain to query |
+| `tier` | string (query) | No | `"standard"` | Analysis tier |
+| `limit` | int (query) | No | `20` | Max holders to analyze (1-50) |
+
+**Response:** `200 OK` — `TokenHolderAnalysis` JSON
+
+### GET /history/{address} (v1.6)
+
+Returns historical portfolio snapshots for an address.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `address` | string (path) | Yes | — | Wallet address |
+| `days` | int (query) | No | `30` | Lookback period (1-365) |
+
+**Response:** `200 OK` — `PortfolioHistory` JSON
+
+### GET /monitor/plans (v1.6)
+
+Returns available subscription plans for the whale movement monitor.
+
+**Response:** `200 OK` — `MonitorPlan[]` JSON
+
 ### GET /sla (v1.5)
 
 Returns SLA compliance report with per-endpoint latency percentiles (p50/p95/p99), request counts, error rates, and SLA breach tracking. No authentication required.
@@ -187,6 +221,8 @@ interface WalletProfile {
   transferHistory: TransferHistory | null; // standard+
   similarWallets: SimilarWallets | null;   // standard+
   revokeAdvice: RevokeRecommendations | null; // standard+
+  sanctions: SanctionsCheck | null;  // standard+
+  smartMoney: SmartMoneySignal | null; // standard+
   summary: string | null;           // premium only
   profiledAt: string;
 }
@@ -387,6 +423,76 @@ interface BatchProfileResult {
   address: string;
   profile: WalletProfile | null;
   error: string | null;
+}
+
+interface SanctionsCheck {
+  isSanctioned: boolean;
+  hasSanctionedInteractions: boolean;
+  riskLevel: string;              // "clear" | "caution" | "sanctioned"
+  flags: string[];
+}
+
+interface SmartMoneySignal {
+  address: string;
+  ensName: string | null;
+  profitScore: number;            // 0-100
+  classification: string;        // "smart_money" | "active_trader" | "whale" | "retail" | "unknown"
+  recentTrades: SmartMoneyTrade[];
+  estimatedPnlPct: number | null;
+}
+
+interface SmartMoneyTrade {
+  tokenSymbol: string;
+  tokenAddress: string;
+  action: string;                 // "buy" | "sell"
+  amount: number;
+  valueUsd: number | null;
+  timestamp: string;
+}
+
+interface TokenHolderAnalysis {
+  tokenAddress: string;
+  tokenSymbol: string | null;
+  holdersAnalyzed: number;
+  topHolderConcentration: number | null;
+  holders: HolderProfile[];
+  analyzedAt: string;
+}
+
+interface HolderProfile {
+  address: string;
+  ensName: string | null;
+  balance: number;
+  balancePct: number | null;
+  trustScore: number;
+  trustLevel: string;
+  tags: string[];
+}
+
+interface PortfolioSnapshot {
+  address: string;
+  totalValueUsd: number | null;
+  ethBalance: number;
+  tokenCount: number;
+  transactionCount: number;
+  snapshotAt: string;
+}
+
+interface PortfolioHistory {
+  address: string;
+  snapshotCount: number;
+  currentValueUsd: number | null;
+  oldestValueUsd: number | null;
+  valueChangePct: number | null;
+  snapshots: PortfolioSnapshot[];
+}
+
+interface MonitorPlan {
+  plan: string;
+  monthlyFeeEth: number;
+  maxSubscriptions: number;
+  pollIntervalSeconds: number;
+  includesBalanceAlerts: boolean;
 }
 ```
 
@@ -699,6 +805,9 @@ Lightweight `GET /trust/{address}` endpoint that scores wallets without full pro
   Transfer history ○               ●               ●
   Similar wallets  ○               ●               ●
   Revoke advice    ○               ●               ●
+  Sanctions screen ○               ●               ●
+  Smart money      ○               ●               ●
+  Snapshots        ○               ●               ●
   Summary          ○               ○               ●
                    │               │               │
   Response time    ~3s             ~8s             ~8s
@@ -766,3 +875,60 @@ Lightweight `GET /trust/{address}` endpoint that scores wallets without full pro
 | Individual batch address fails | Error captured per-address, other addresses still succeed |
 
 The profiler follows a **graceful degradation** pattern — individual data source failures never crash the entire request.
+
+### 5.22 SanctionsService (v1.6)
+
+Screens wallet addresses against a static OFAC SDN list of sanctioned Ethereum addresses.
+
+**Sanctioned addresses include:** Tornado Cash contracts (0x722122df12D4e14e13Ac3b6895a86e84145b6967, etc.), Lazarus Group wallets, and other OFAC-designated addresses.
+
+**Screening logic:**
+1. Check if the wallet address itself is on the sanctions list → `sanctioned`
+2. Check if any top interaction counterparties are sanctioned → `caution`
+3. Neither → `clear`
+
+### 5.23 SmartMoneyService (v1.6)
+
+Analyzes wallet trading patterns using 6 weighted factors:
+
+| Factor | Max Points | Signal |
+|---|---|---|
+| Portfolio efficiency | 25 | Value per transaction ratio |
+| Token diversity | 20 | Number of priced non-spam tokens held |
+| Net flow direction | 15 | Accumulating vs distributing |
+| Trading frequency | 10 | Transfers per active day |
+| Blue-chip allocation | 15 | Portfolio quality blue-chip percentage |
+| DeFi participation | 15 | Active DeFi positions |
+
+**Classification matrix:**
+
+| Score | Total Value | Classification |
+|---|---|---|
+| > 70 | > $100K | `smart_money` |
+| > 70 | any | `active_trader` |
+| any | > $1M | `whale` |
+| > 40 | any | `active_trader` |
+| other | any | `retail` |
+
+### 5.24 TokenHolderService (v1.6)
+
+Analyzes top holders of ERC-20 tokens by processing recent transfer events from Etherscan V2.
+
+**Algorithm:**
+1. Fetch last 500 token transfer events via Etherscan V2 `tokentx`
+2. Aggregate net balances per address (inflows - outflows)
+3. Filter to positive balances, sort descending
+4. Profile each holder: ETH balance, tx count, ENS, trust score
+5. Calculate top-10 holder concentration percentage
+
+**Trust scoring per holder:** Active trader (100+ txs) = +30, well-funded (10+ ETH) = +25, ENS holder = +20.
+
+### 5.25 SnapshotService (v1.6)
+
+In-memory portfolio snapshot storage using `ConcurrentDictionary`.
+
+**Recording:** Snapshots are automatically recorded when standard/premium profiles are built. Deduplicates by requiring 1-hour minimum between snapshots for the same address. Caps at 100 snapshots per address.
+
+**Snapshot data:** Address, total value USD, ETH balance, non-spam token count, transaction count, timestamp.
+
+**History query:** Returns snapshots within a configurable lookback period (default 30 days) with value change percentage calculation.

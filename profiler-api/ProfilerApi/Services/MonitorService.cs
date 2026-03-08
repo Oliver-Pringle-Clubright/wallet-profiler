@@ -67,6 +67,13 @@ public class MonitorService : BackgroundService
         };
     }
 
+    public static List<MonitorPlan> GetPlans() =>
+    [
+        new() { Plan = "free", MonthlyFeeEth = 0, MaxSubscriptions = 1, PollIntervalSeconds = 60, IncludesBalanceAlerts = false },
+        new() { Plan = "basic", MonthlyFeeEth = 0.01m, MaxSubscriptions = 10, PollIntervalSeconds = 30, IncludesBalanceAlerts = true },
+        new() { Plan = "premium", MonthlyFeeEth = 0.05m, MaxSubscriptions = 100, PollIntervalSeconds = 15, IncludesBalanceAlerts = true },
+    ];
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Monitor service started");

@@ -156,6 +156,24 @@ public class SummaryService
             parts.Add($"{profile.SimilarWallets.Matches.Count} similar wallet(s) found (top match: {Shorten(topMatch.Address)}, {topMatch.SimilarityScore}% similarity).");
         }
 
+        // Sanctions screening
+        if (profile.Sanctions != null && profile.Sanctions.RiskLevel != "clear")
+        {
+            var sanctionsPart = profile.Sanctions.RiskLevel == "sanctioned"
+                ? $"SANCTIONED ADDRESS — this wallet is on the OFAC SDN list: {string.Join(", ", profile.Sanctions.Flags)}."
+                : $"Sanctions caution — {string.Join(", ", profile.Sanctions.Flags)}.";
+            parts.Add(sanctionsPart);
+        }
+
+        // Smart money analysis
+        if (profile.SmartMoney != null && profile.SmartMoney.Classification != "unknown")
+        {
+            var smPart = $"Smart money classification: {profile.SmartMoney.Classification} (profit score {profile.SmartMoney.ProfitScore}/100)";
+            if (profile.SmartMoney.EstimatedPnlPct.HasValue)
+                smPart += $", estimated PnL {profile.SmartMoney.EstimatedPnlPct:+0.0;-0.0}%";
+            parts.Add(smPart + ".");
+        }
+
         // Risk
         var riskPart = profile.Risk.Level switch
         {

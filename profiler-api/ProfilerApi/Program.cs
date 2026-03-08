@@ -30,6 +30,9 @@ builder.Services.AddSingleton<RevokeRecommendationService>();
 builder.Services.AddSingleton<WalletClusteringService>();
 builder.Services.AddSingleton<ApiKeyAuthService>();
 builder.Services.AddSingleton<SlaTrackingService>();
+builder.Services.AddSingleton<SanctionsService>();
+builder.Services.AddSingleton<SmartMoneyService>();
+builder.Services.AddSingleton<SnapshotService>();
 builder.Services.AddScoped<ProfileOrchestrator>();
 builder.Services.AddSingleton<MonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorService>());
@@ -38,6 +41,7 @@ builder.Services.AddHttpClient<ActivityService>();
 builder.Services.AddHttpClient<PriceService>();
 builder.Services.AddHttpClient<NftService>();
 builder.Services.AddHttpClient<TransferHistoryService>();
+builder.Services.AddHttpClient<TokenHolderService>();
 
 var app = builder.Build();
 
@@ -365,6 +369,51 @@ app.MapDelete("/monitor/{id}", (string id, MonitorService monitorService) =>
     return Results.NotFound(new { error = $"Subscription {id} not found" });
 });
 
+// --- GET /token/{contract}/holders (v1.6) ---
+app.MapGet("/token/{contract}/holders", async (
+    string contract,
+    TokenHolderService holderService,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("token_holders");
+    var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
+    var tier = httpContext.Request.Query["tier"].FirstOrDefault() ?? "standard";
+    var limitStr = httpContext.Request.Query["limit"].FirstOrDefault();
+    var limit = int.TryParse(limitStr, out var l) ? l : 20;
+
+    try
+    {
+        var analysis = await holderService.AnalyzeHoldersAsync(contract, chain.ToLowerInvariant(), tier.ToLowerInvariant(), limit);
+        return Results.Ok(analysis);
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// --- GET /history/{address} (v1.6) ---
+app.MapGet("/history/{address}", (
+    string address,
+    SnapshotService snapshotService,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("history");
+    var daysStr = httpContext.Request.Query["days"].FirstOrDefault();
+    var days = int.TryParse(daysStr, out var d) ? Math.Clamp(d, 1, 365) : 30;
+
+    return Results.Ok(snapshotService.GetHistory(address.Trim(), days));
+});
+
+// --- GET /monitor/plans (v1.6) ---
+app.MapGet("/monitor/plans", () =>
+{
+    return Results.Ok(MonitorService.GetPlans());
+});
+
 // --- GET /sla (v1.5) ---
 app.MapGet("/sla", (SlaTrackingService sla, ProfileCacheService cache) =>
 {
@@ -394,7 +443,7 @@ app.MapGet("/tiers", () => Results.Ok(new
     standard = new
     {
         fee = "0.001 ETH",
-        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support", "Token transfer history timeline", "Similar wallet clustering", "Revoke recommendation engine" }
+        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support", "Token transfer history timeline", "Similar wallet clustering", "Revoke recommendation engine", "OFAC sanctions screening", "Smart money analysis", "Portfolio snapshots & history" }
     },
     premium = new
     {

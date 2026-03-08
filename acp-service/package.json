@@ -1,6 +1,6 @@
 {
   "name": "wallet-profiler-acp",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "ACP service wrapper for the Wallet Profiler C# API",
   "type": "module",
   "scripts": {

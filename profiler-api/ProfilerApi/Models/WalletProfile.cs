@@ -24,6 +24,8 @@ public class WalletProfile
     public TransferHistory? TransferHistory { get; set; }
     public SimilarWallets? SimilarWallets { get; set; }
     public RevokeRecommendations? RevokeAdvice { get; set; }
+    public SanctionsCheck? Sanctions { get; set; }
+    public SmartMoneySignal? SmartMoney { get; set; }
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -268,6 +270,102 @@ public class RevokeRecommendation
     public string Priority { get; set; } = "low"; // low, medium, high
     public string Reason { get; set; } = string.Empty;
     public bool IsUnlimited { get; set; }
+}
+
+// --- v1.6: Sanctions Screening ---
+
+public class SanctionsCheck
+{
+    public bool IsSanctioned { get; set; }
+    public bool HasSanctionedInteractions { get; set; }
+    public string RiskLevel { get; set; } = "clear"; // clear, caution, sanctioned
+    public List<string> Flags { get; set; } = [];
+}
+
+// --- v1.6: Token Holder Analysis ---
+
+public class TokenHolderRequest
+{
+    public string ContractAddress { get; set; } = string.Empty;
+    public string Chain { get; set; } = "ethereum";
+    public string Tier { get; set; } = "basic";
+    public int Limit { get; set; } = 20;
+}
+
+public class TokenHolderAnalysis
+{
+    public string TokenAddress { get; set; } = string.Empty;
+    public string? TokenSymbol { get; set; }
+    public int HoldersAnalyzed { get; set; }
+    public decimal? TopHolderConcentration { get; set; }
+    public List<HolderProfile> Holders { get; set; } = [];
+    public DateTime AnalyzedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class HolderProfile
+{
+    public string Address { get; set; } = string.Empty;
+    public string? EnsName { get; set; }
+    public decimal Balance { get; set; }
+    public decimal? BalancePct { get; set; }
+    public int TrustScore { get; set; }
+    public string TrustLevel { get; set; } = "untrusted";
+    public List<string> Tags { get; set; } = [];
+}
+
+// --- v1.6: Smart Money Tracking ---
+
+public class SmartMoneySignal
+{
+    public string Address { get; set; } = string.Empty;
+    public string? EnsName { get; set; }
+    public int ProfitScore { get; set; } // 0-100
+    public string Classification { get; set; } = "unknown"; // smart_money, active_trader, whale, retail
+    public List<SmartMoneyTrade> RecentTrades { get; set; } = [];
+    public decimal? EstimatedPnlPct { get; set; }
+}
+
+public class SmartMoneyTrade
+{
+    public string TokenSymbol { get; set; } = string.Empty;
+    public string TokenAddress { get; set; } = string.Empty;
+    public string Action { get; set; } = string.Empty; // "buy" or "sell"
+    public decimal Amount { get; set; }
+    public decimal? ValueUsd { get; set; }
+    public DateTime Timestamp { get; set; }
+}
+
+// --- v1.6: Historical Snapshots ---
+
+public class PortfolioSnapshot
+{
+    public string Address { get; set; } = string.Empty;
+    public decimal? TotalValueUsd { get; set; }
+    public decimal EthBalance { get; set; }
+    public int TokenCount { get; set; }
+    public int TransactionCount { get; set; }
+    public DateTime SnapshotAt { get; set; }
+}
+
+public class PortfolioHistory
+{
+    public string Address { get; set; } = string.Empty;
+    public int SnapshotCount { get; set; }
+    public decimal? CurrentValueUsd { get; set; }
+    public decimal? OldestValueUsd { get; set; }
+    public decimal? ValueChangePct { get; set; }
+    public List<PortfolioSnapshot> Snapshots { get; set; } = [];
+}
+
+// --- v1.6: Monitor Subscription Plans ---
+
+public class MonitorPlan
+{
+    public string Plan { get; set; } = "free"; // free, basic, premium
+    public decimal MonthlyFeeEth { get; set; }
+    public int MaxSubscriptions { get; set; }
+    public int PollIntervalSeconds { get; set; }
+    public bool IncludesBalanceAlerts { get; set; }
 }
 
 // --- v1.3: Cross-Chain Aggregated Profile ---

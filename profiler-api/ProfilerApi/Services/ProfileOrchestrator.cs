@@ -24,6 +24,9 @@ public class ProfileOrchestrator
     private readonly TransferHistoryService _transferService;
     private readonly WalletClusteringService _clusteringService;
     private readonly RevokeRecommendationService _revokeService;
+    private readonly SanctionsService _sanctionsService;
+    private readonly SmartMoneyService _smartMoneyService;
+    private readonly SnapshotService _snapshotService;
     private readonly ProfileCacheService _cacheService;
     private readonly ILogger<ProfileOrchestrator> _logger;
 
@@ -44,6 +47,9 @@ public class ProfileOrchestrator
         TransferHistoryService transferService,
         WalletClusteringService clusteringService,
         RevokeRecommendationService revokeService,
+        SanctionsService sanctionsService,
+        SmartMoneyService smartMoneyService,
+        SnapshotService snapshotService,
         ProfileCacheService cacheService,
         ILogger<ProfileOrchestrator> logger)
     {
@@ -63,6 +69,9 @@ public class ProfileOrchestrator
         _transferService = transferService;
         _clusteringService = clusteringService;
         _revokeService = revokeService;
+        _sanctionsService = sanctionsService;
+        _smartMoneyService = smartMoneyService;
+        _snapshotService = snapshotService;
         _cacheService = cacheService;
         _logger = logger;
     }
@@ -202,6 +211,12 @@ public class ProfileOrchestrator
 
             // Revoke recommendations (v1.4)
             profile.RevokeAdvice = _revokeService.Analyze(profile.ApprovalRisk);
+
+            // Sanctions screening (v1.6)
+            profile.Sanctions = _sanctionsService.Screen(address, profile.TopInteractions);
+
+            // Smart money analysis (v1.6)
+            profile.SmartMoney = _smartMoneyService.Analyze(profile, profile.TransferHistory);
         }
 
         // --- PREMIUM: natural language summary ---
@@ -211,6 +226,11 @@ public class ProfileOrchestrator
         }
 
         _cacheService.SetProfile(address, chain, tier, profile);
+
+        // Record snapshot for historical tracking (v1.6)
+        if (tier is "standard" or "premium")
+            _snapshotService.RecordSnapshot(profile);
+
         return profile;
     }
 }

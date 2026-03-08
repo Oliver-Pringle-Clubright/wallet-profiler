@@ -1,4 +1,4 @@
-# Wallet Profiler v1.5 — User Guide
+# Wallet Profiler v1.6 — User Guide
 
 ## Overview
 
@@ -36,6 +36,9 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 | Token transfer history timeline | — | Yes | Yes |
 | Similar wallet clustering | — | Yes | Yes |
 | Revoke recommendation engine | — | Yes | Yes |
+| OFAC sanctions screening | — | Yes | Yes |
+| Smart money analysis | — | Yes | Yes |
+| Portfolio snapshots & history | — | Yes | Yes |
 | Natural language summary | — | — | Yes |
 
 ## Getting Started
@@ -305,6 +308,8 @@ curl http://localhost:5000/tiers
 | `transferHistory` | object? | Std+ | Token transfer timeline with flow analysis |
 | `similarWallets` | object? | Std+ | Similar wallets by token overlap |
 | `revokeAdvice` | object? | Std+ | Approval revocation recommendations |
+| `sanctions` | object? | Std+ | OFAC sanctions screening results |
+| `smartMoney` | object? | Std+ | Smart money classification and analysis |
 | `summary` | string? | Premium | Natural language wallet summary |
 
 ### Wallet Tags
@@ -436,6 +441,80 @@ Available on standard and premium tiers. Analyzes token approvals and recommends
 | `revokeAdvice.highPriority` | Count of high-priority revocations |
 | `revokeAdvice.overallUrgency` | `none`, `low`, `medium`, or `high` |
 | `revokeAdvice.recommendations[]` | Individual recommendations with priority and reason |
+
+### OFAC Sanctions Screening (v1.6)
+
+Available on standard and premium tiers. Screens the wallet address and its top interaction counterparties against OFAC SDN sanctioned addresses.
+
+| Field | Description |
+|---|---|
+| `sanctions.isSanctioned` | Whether the wallet itself is sanctioned |
+| `sanctions.hasSanctionedInteractions` | Whether any counterparties are sanctioned |
+| `sanctions.riskLevel` | `clear`, `caution`, or `sanctioned` |
+| `sanctions.flags` | List of specific flags/concerns |
+
+### Smart Money Analysis (v1.6)
+
+Available on standard and premium tiers. Analyzes trading patterns and classifies the wallet.
+
+| Field | Description |
+|---|---|
+| `smartMoney.profitScore` | Trading proficiency score (0-100) |
+| `smartMoney.classification` | `smart_money`, `active_trader`, `whale`, or `retail` |
+| `smartMoney.recentTrades` | Last 10 trades with token, action, amount |
+| `smartMoney.estimatedPnlPct` | Estimated profit/loss percentage |
+
+### Token Holder Analysis (v1.6)
+
+**Endpoint:** `GET /token/{contract}/holders?chain=ethereum&limit=20`
+
+Analyzes top holders of any ERC-20 token with trust scoring.
+
+```bash
+curl "http://localhost:5000/token/0xdac17f958d2ee523a2206206994597c13d831ec7/holders?limit=5"
+```
+
+| Field | Description |
+|---|---|
+| `tokenSymbol` | Token symbol |
+| `holdersAnalyzed` | Number of holders profiled |
+| `topHolderConcentration` | % of supply held by top 10 holders |
+| `holders[].trustScore` | Trust score for each holder (0-100) |
+| `holders[].tags` | Tags like `active-trader`, `well-funded`, `ens-holder` |
+
+### Portfolio History (v1.6)
+
+**Endpoint:** `GET /history/{address}?days=30`
+
+Returns historical portfolio snapshots recorded when profiles are built.
+
+```bash
+curl "http://localhost:5000/history/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+```
+
+| Field | Description |
+|---|---|
+| `snapshotCount` | Number of snapshots in the period |
+| `currentValueUsd` | Latest portfolio value |
+| `oldestValueUsd` | Oldest portfolio value in period |
+| `valueChangePct` | Percentage change over the period |
+| `snapshots[]` | Individual snapshots with timestamps |
+
+### Monitor Subscription Plans (v1.6)
+
+**Endpoint:** `GET /monitor/plans`
+
+Returns available subscription tiers for the whale movement monitor.
+
+```bash
+curl http://localhost:5000/monitor/plans
+```
+
+| Plan | Fee | Max Subs | Poll Interval | Balance Alerts |
+|---|---|---|---|---|
+| Free | 0 ETH/month | 1 | 60s | No |
+| Basic | 0.01 ETH/month | 10 | 30s | Yes |
+| Premium | 0.05 ETH/month | 100 | 15s | Yes |
 
 ### Risk Score Interpretation
 

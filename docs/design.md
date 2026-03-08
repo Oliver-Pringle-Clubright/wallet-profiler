@@ -1,4 +1,4 @@
-# Wallet Profiler v1.5 — Design Document
+# Wallet Profiler v1.6 — Design Document
 
 ## 1. Problem Statement
 
@@ -254,3 +254,25 @@ ENS and price caches remain memory-only for speed.
 Every endpoint request is automatically instrumented with a `RequestTracker` that records latency, success/failure, and SLA compliance. The `GET /sla` endpoint exposes a real-time report with p50/p95/p99 percentiles, breach counts, and compliance percentages. This gives operators and buyers visibility into service reliability.
 
 Extracted ~100 lines of inline profile-building logic from `Program.cs` into a reusable `ProfileOrchestrator` service. Now shared by `/profile`, `/profile/batch`, and `/profile/multi-chain`, eliminating triple code duplication and making future features easier to add.
+
+## 11. v1.6 New Features
+
+### OFAC Sanctions Screening
+
+Screens wallet addresses against a static OFAC SDN list (Tornado Cash contracts, Lazarus Group wallets). Also checks if any top interaction counterparties are sanctioned. Returns risk levels: `clear`, `caution` (interacted with sanctioned address), or `sanctioned` (address itself is sanctioned). Critical for compliance-focused agents.
+
+### Smart Money Analysis
+
+Analyzes wallet trading patterns using 6 factors: portfolio efficiency (value per transaction), token diversity, net flow direction, trading frequency, blue-chip allocation, and DeFi participation. Classifies wallets as: `smart_money`, `active_trader`, `whale`, or `retail`. Returns a profit score (0-100), recent trades, and estimated PnL percentage.
+
+### Token Holder Analysis
+
+`GET /token/{contract}/holders` — analyzes top holders of any ERC-20 token. Uses Etherscan V2 token transfer events to approximate holder balances, then profiles each holder with ETH balance, transaction count, ENS, and a trust score. Returns concentration metrics showing how much of the supply the top holders control.
+
+### Historical Portfolio Snapshots
+
+Automatically records portfolio snapshots when profiles are built (standard+ tiers). Deduplicates by 1-hour windows, caps at 100 snapshots per address. `GET /history/{address}` returns historical data with value change percentages. Enables agents to track portfolio trends over time.
+
+### Recurring Webhook Subscription Plans
+
+Added tiered subscription plans for the whale movement monitor: free (1 subscription, 60s poll), basic (10 subs, 30s poll, 0.01 ETH/month), and premium (100 subs, 15s poll, 0.05 ETH/month). `GET /monitor/plans` returns available plans. Creates a recurring revenue stream.
