@@ -18,6 +18,8 @@ public class WalletProfile
     public List<string> Tags { get; set; } = [];
     public PortfolioQuality? PortfolioQuality { get; set; }
     public AcpTrustScore? AcpTrust { get; set; }
+    public ApprovalRisk? ApprovalRisk { get; set; }
+    public List<ContractInteraction> TopInteractions { get; set; } = [];
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -69,6 +71,46 @@ public class AcpTrustScore
 {
     public int Score { get; set; }
     public string Level { get; set; } = "untrusted";
+    public List<string> Factors { get; set; } = [];
+}
+
+public class ApprovalRisk
+{
+    public int TotalApprovals { get; set; }
+    public int UnlimitedApprovals { get; set; }
+    public int HighRiskApprovals { get; set; }
+    public string RiskLevel { get; set; } = "safe";
+    public List<TokenApproval> Approvals { get; set; } = [];
+}
+
+public class TokenApproval
+{
+    public string TokenSymbol { get; set; } = string.Empty;
+    public string TokenAddress { get; set; } = string.Empty;
+    public string SpenderAddress { get; set; } = string.Empty;
+    public string SpenderLabel { get; set; } = string.Empty;
+    public string SpenderCategory { get; set; } = string.Empty;
+    public bool IsUnlimited { get; set; }
+    public string RiskLevel { get; set; } = "safe";
+}
+
+public class ContractInteraction
+{
+    public string Address { get; set; } = string.Empty;
+    public string? Label { get; set; }
+    public string? Category { get; set; }
+    public int TransactionCount { get; set; }
+}
+
+public class TrustCheckResponse
+{
+    public string Address { get; set; } = string.Empty;
+    public string? EnsName { get; set; }
+    public decimal EthBalance { get; set; }
+    public int TransactionCount { get; set; }
+    public int TokenCount { get; set; }
+    public int TrustScore { get; set; }
+    public string TrustLevel { get; set; } = "untrusted";
     public List<string> Factors { get; set; } = [];
 }
 

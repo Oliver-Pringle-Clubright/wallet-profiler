@@ -1,8 +1,8 @@
-# Wallet Profiler v1.1 — User Guide
+# Wallet Profiler v1.2 — User Guide
 
 ## Overview
 
-The Wallet Profiler is an AGDP (Agent GDP) service agent that provides comprehensive on-chain wallet analysis for Ethereum-compatible blockchains. Given a wallet address or ENS name, it returns a detailed profile including token holdings with live USD valuations, DeFi positions, transaction history, risk assessment, spam detection, wallet tags, portfolio quality grading, and ACP trust scoring.
+The Wallet Profiler is an AGDP (Agent GDP) service agent that provides comprehensive on-chain wallet analysis for Ethereum-compatible blockchains. Given a wallet address or ENS name, it returns a detailed profile including token holdings with live USD valuations, DeFi positions, transaction history, risk assessment, spam detection, wallet tags, portfolio quality grading, ACP trust scoring, token approval risk scanning, and contract interaction labeling.
 
 The service offers three pricing tiers (basic, standard, premium) and runs on the Agent Commerce Protocol (ACP) marketplace.
 
@@ -30,6 +30,8 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 | Transaction activity history | — | Yes | Yes |
 | Portfolio quality score | — | Yes | Yes |
 | ACP trust score | — | Yes | Yes |
+| Token approval risk scan | — | Yes | Yes |
+| Contract interaction labels | — | Yes | Yes |
 | Natural language summary | — | — | Yes |
 
 ## Getting Started
@@ -89,6 +91,37 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 ```
 
 Both `chain` (defaults to `"ethereum"`) and `tier` (defaults to `"standard"`) are optional.
+
+### Quick Trust Check
+
+**Endpoint:** `GET /trust/{address}`
+
+Lightweight pre-transaction trust check (~500ms). Returns trust score without full profile analysis. Supports ENS names.
+
+```bash
+curl http://localhost:5000/trust/vitalik.eth
+```
+
+**Response:**
+```json
+{
+  "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+  "ensName": "vitalik.eth",
+  "ethBalance": 32.13,
+  "transactionCount": 1647,
+  "tokenCount": 100,
+  "trustScore": 100,
+  "trustLevel": "high",
+  "factors": [
+    "Deep history 1647 txs (+35)",
+    "Large ETH balance 32.13 (+25)",
+    "ENS: vitalik.eth (+20)",
+    "Diverse portfolio 100 tokens (+20)"
+  ]
+}
+```
+
+No tier required — always free/flat fee (0.0001 ETH suggested). Designed for high-volume pre-transaction checks.
 
 ### Batch Profile Request
 
@@ -211,6 +244,8 @@ curl http://localhost:5000/tiers
 | `tags` | string[] | All | Classification tags (whale, defi-user, veteran, etc.) |
 | `portfolioQuality` | object? | Std+ | Portfolio quality grade and metrics |
 | `acpTrust` | object? | Std+ | ACP trust score for agent-to-agent commerce |
+| `approvalRisk` | object? | Std+ | Token approval risk scan results |
+| `topInteractions` | array | Std+ | Top 10 interacted-with contracts with labels |
 | `summary` | string? | Premium | Natural language wallet summary |
 
 ### Wallet Tags
@@ -263,6 +298,37 @@ Available on standard and premium tiers. Evaluates counterparty trustworthiness 
 | 0–29 | Untrusted | Insufficient trust signals — new or empty wallet |
 
 Trust factors include: wallet age, ETH balance, transaction depth, ENS ownership, DeFi participation, portfolio quality, and interaction diversity.
+
+### Token Approval Risk Scan
+
+Available on standard and premium tiers. Checks ERC-20 `allowance()` on top 10 non-spam tokens against known DEX routers and protocols:
+
+| Field | Description |
+|---|---|
+| `totalApprovals` | Number of active non-zero approvals found |
+| `unlimitedApprovals` | Approvals with effectively unlimited allowance |
+| `highRiskApprovals` | Approvals to unverified or risky contracts |
+| `riskLevel` | Overall risk: `safe`, `low`, `caution`, or `danger` |
+| `approvals[]` | Individual approval details (token, spender, label, risk) |
+
+**Checked spenders:** Uniswap V2/V3, SushiSwap, 1inch, 0x Exchange, OpenSea Seaport.
+
+### Contract Interaction Labels
+
+Available on standard and premium tiers. Labels the wallet's top 10 most-interacted-with addresses using a database of 45+ known Ethereum contracts:
+
+| Category | Examples |
+|---|---|
+| `dex` | Uniswap, SushiSwap, 1inch, Curve |
+| `nft` | OpenSea, Blur, LooksRare |
+| `lending` | Aave V2/V3, Compound |
+| `bridge` | Wormhole, Stargate, Arbitrum, Optimism |
+| `staking` | Lido, Coinbase cbETH, Rocket Pool |
+| `mixer` | Tornado Cash (flagged as security concern) |
+| `governance` | UNI, AAVE, MKR, ENS |
+| `identity` | ENS Registrar |
+
+Unlabeled addresses show `label: null` — these are typically personal wallets or unlisted contracts.
 
 ### Risk Score Interpretation
 
@@ -323,5 +389,9 @@ See [DEPLOY.md](../DEPLOY.md) for full deployment instructions.
 **DeFi positions empty:**
 - Only Aave V3 and Compound V3 are checked
 
-**Portfolio quality / ACP trust is null:**
+**Portfolio quality / ACP trust / approval risk is null:**
 - These are only included with `standard` and `premium` tiers
+
+**Approval scan shows 0 approvals:**
+- The wallet may not have interacted with the checked DEX routers
+- Only the top 10 non-spam tokens are scanned against 7 known spenders

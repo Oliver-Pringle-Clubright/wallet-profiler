@@ -98,6 +98,24 @@ public class SummaryService
         if (profile.AcpTrust != null)
             parts.Add($"ACP trust: {profile.AcpTrust.Level} ({profile.AcpTrust.Score}/100).");
 
+        // Approval risk
+        if (profile.ApprovalRisk != null && profile.ApprovalRisk.TotalApprovals > 0)
+        {
+            var approvalPart = $"{profile.ApprovalRisk.TotalApprovals} active token approval(s) detected";
+            if (profile.ApprovalRisk.UnlimitedApprovals > 0)
+                approvalPart += $" ({profile.ApprovalRisk.UnlimitedApprovals} unlimited)";
+            approvalPart += $" — approval risk: {profile.ApprovalRisk.RiskLevel}.";
+            parts.Add(approvalPart);
+        }
+
+        // Top interactions
+        if (profile.TopInteractions.Count > 0)
+        {
+            var labeled = profile.TopInteractions.Where(i => i.Label != null).Take(3).ToList();
+            if (labeled.Count > 0)
+                parts.Add($"Top interactions: {string.Join(", ", labeled.Select(i => $"{i.Label} ({i.TransactionCount} txs)"))}.");
+        }
+
         // Risk
         var riskPart = profile.Risk.Level switch
         {

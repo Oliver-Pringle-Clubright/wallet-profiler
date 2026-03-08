@@ -1,4 +1,4 @@
-# Wallet Profiler v1.1 — Design Document
+# Wallet Profiler v1.2 — Design Document
 
 ## 1. Problem Statement
 
@@ -187,3 +187,17 @@ Token metadata resolution is the main bottleneck. By capping metadata calls per 
 - **Behavioral scoring** — ML-based risk assessment from transaction patterns
 - **ERC-8004 agent verification** — check if wallet is a registered on-chain agent
 - **Virtuals Agent Token detection** — identify wallets with launched agent tokens
+
+## 7. v1.2 New Features
+
+### Token Approval Risk Scanner
+
+Checks ERC-20 `allowance()` on discovered tokens against known DEX routers (Uniswap, SushiSwap, 1inch, OpenSea). Identifies unlimited approvals that represent potential security risks. No equivalent exists on AGDP — this is a unique differentiator for security-focused agents.
+
+### Contract Interaction Labels
+
+Labels the wallet's top 10 most-interacted-with addresses using a database of 45+ known Ethereum contracts (DEXes, bridges, lending protocols, mixers, staking contracts). Turns raw addresses into actionable intelligence — agents can instantly see "this wallet uses Tornado Cash" or "heavy Uniswap trader."
+
+### Quick Trust Endpoint
+
+`GET /trust/{address}` — lightweight pre-transaction trust check returning only score + level in ~500ms. Uses 4 parallel RPC calls (balance, tx count, ENS, token count) without full metadata resolution. Designed for high-volume agents doing thousands of pre-transaction checks at a low price point.

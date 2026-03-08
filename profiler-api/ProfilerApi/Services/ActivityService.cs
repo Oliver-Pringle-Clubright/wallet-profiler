@@ -17,14 +17,14 @@ public class ActivityService
         _logger = logger;
     }
 
-    public async Task<WalletActivity> GetActivityAsync(string address, string chain = "ethereum")
+    public async Task<(WalletActivity Activity, List<(string Address, int Count)> TopCounterparties)> GetActivityAsync(string address, string chain = "ethereum")
     {
         if (!ChainConfig.Chains.TryGetValue(chain, out var chainConfig))
-            return new WalletActivity();
+            return (new WalletActivity(), []);
 
         var apiKey = _config["Etherscan:ApiKey"];
         if (string.IsNullOrEmpty(apiKey))
-            return new WalletActivity();
+            return (new WalletActivity(), []);
 
         try
         {
@@ -32,35 +32,47 @@ public class ActivityService
             var response = await _httpClient.GetFromJsonAsync<EtherscanResponse<TxDto>>(url);
 
             if (response?.Result is null || !response.IsSuccess || response.Result.Count == 0)
-                return new WalletActivity();
+                return (new WalletActivity(), []);
 
             var txs = response.Result;
             var firstTx = DateTimeOffset.FromUnixTimeSeconds(long.Parse(txs.First().TimeStamp!)).UtcDateTime;
             var lastTx = DateTimeOffset.FromUnixTimeSeconds(long.Parse(txs.Last().TimeStamp!)).UtcDateTime;
 
-            var uniqueAddresses = txs
+            var counterpartyAddresses = txs
                 .SelectMany(tx => new[] { tx.To, tx.From })
-                .Where(a => !string.IsNullOrEmpty(a) && !a.Equals(address, StringComparison.OrdinalIgnoreCase))
+                .Where(a => !string.IsNullOrEmpty(a) && !a.Equals(address, StringComparison.OrdinalIgnoreCase));
+
+            var uniqueAddresses = counterpartyAddresses
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count();
+
+            // Top 10 most interacted-with addresses
+            var topCounterparties = counterpartyAddresses
+                .GroupBy(a => a!.ToLowerInvariant())
+                .OrderByDescending(g => g.Count())
+                .Take(10)
+                .Select(g => (Address: g.Key, Count: g.Count()))
+                .ToList();
 
             var activeDays = txs
                 .Select(tx => DateTimeOffset.FromUnixTimeSeconds(long.Parse(tx.TimeStamp!)).Date)
                 .Distinct()
                 .Count();
 
-            return new WalletActivity
+            var activity = new WalletActivity
             {
                 FirstTransaction = firstTx,
                 LastTransaction = lastTx,
                 DaysActive = activeDays,
                 UniqueInteractions = uniqueAddresses
             };
+
+            return (activity, topCounterparties);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to fetch activity for {Address} on {Chain}", address, chain);
-            return new WalletActivity();
+            return (new WalletActivity(), []);
         }
     }
 

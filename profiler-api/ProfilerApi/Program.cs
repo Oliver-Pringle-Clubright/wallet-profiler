@@ -12,6 +12,8 @@ builder.Services.AddSingleton<DeFiService>();
 builder.Services.AddSingleton<WalletTaggingService>();
 builder.Services.AddSingleton<PortfolioQualityService>();
 builder.Services.AddSingleton<AcpTrustService>();
+builder.Services.AddSingleton<ContractLabelService>();
+builder.Services.AddSingleton<ApprovalScannerService>();
 builder.Services.AddHttpClient<TokenService>();
 builder.Services.AddHttpClient<ActivityService>();
 builder.Services.AddHttpClient<PriceService>();
@@ -30,6 +32,8 @@ app.MapPost("/profile", async (
     WalletTaggingService taggingService,
     PortfolioQualityService qualityService,
     AcpTrustService trustService,
+    ApprovalScannerService approvalService,
+    ContractLabelService labelService,
     ProfileCacheService cacheService,
     ILogger<Program> logger) =>
 {
@@ -76,7 +80,7 @@ app.MapPost("/profile", async (
 
     // --- STANDARD tier adds: DeFi + activity + USD prices ---
     Task<List<DeFiPosition>>? defiTask = null;
-    Task<WalletActivity>? activityTask = null;
+    Task<(WalletActivity Activity, List<(string Address, int Count)> TopCounterparties)>? activityTask = null;
 
     if (tier is "standard" or "premium")
     {
@@ -92,7 +96,14 @@ app.MapPost("/profile", async (
     var txCount = txCountTask.Result;
     var tokens = tokensTask.Result;
     var defiPositions = defiTask?.Result ?? [];
-    var activity = activityTask?.Result;
+    WalletActivity? activity = null;
+    List<(string Address, int Count)>? topCounterparties = null;
+    if (activityTask != null)
+    {
+        var activityResult = activityTask.Result;
+        activity = activityResult.Activity;
+        topCounterparties = activityResult.TopCounterparties;
+    }
 
     // USD prices for standard and premium tiers
     decimal? ethPrice = null;
@@ -137,15 +148,18 @@ app.MapPost("/profile", async (
     // --- Wallet tags (all tiers) ---
     profile.Tags = taggingService.GenerateTags(profile);
 
-    // --- Portfolio quality (standard+) ---
+    // --- Standard+ features ---
     if (tier is "standard" or "premium")
     {
         profile.PortfolioQuality = qualityService.Evaluate(profile);
-    }
 
-    // --- ACP trust score (standard+) ---
-    if (tier is "standard" or "premium")
-    {
+        // Contract interaction labels
+        if (topCounterparties != null && topCounterparties.Count > 0)
+            profile.TopInteractions = labelService.LabelInteractions(topCounterparties);
+
+        // Approval risk scan
+        profile.ApprovalRisk = await approvalService.ScanAsync(web3, address, tokens);
+
         profile.AcpTrust = trustService.Evaluate(profile);
     }
 
@@ -173,6 +187,8 @@ app.MapPost("/profile/batch", async (
     WalletTaggingService taggingService,
     PortfolioQualityService qualityService,
     AcpTrustService trustService,
+    ApprovalScannerService approvalService,
+    ContractLabelService labelService,
     ProfileCacheService cacheService,
     ILogger<Program> logger) =>
 {
@@ -220,7 +236,7 @@ app.MapPost("/profile/batch", async (
             var parallel = new List<Task> { balanceTask, txCountTask, ensTask, tokensTask };
 
             Task<List<DeFiPosition>>? defiTask = null;
-            Task<WalletActivity>? activityTask = null;
+            Task<(WalletActivity Activity, List<(string Address, int Count)> TopCounterparties)>? activityTask = null;
             if (tier is "standard" or "premium")
             {
                 defiTask = defiService.GetPositionsAsync(web3, address, chain);
@@ -232,6 +248,14 @@ app.MapPost("/profile/batch", async (
             await Task.WhenAll(parallel);
 
             var tokens = tokensTask.Result;
+            WalletActivity? activity = null;
+            List<(string Address, int Count)>? topCounterparties = null;
+            if (activityTask != null)
+            {
+                activity = activityTask.Result.Activity;
+                topCounterparties = activityTask.Result.TopCounterparties;
+            }
+
             decimal? ethPrice = null, ethValueUsd = null, totalValueUsd = null;
             if (tier is "standard" or "premium")
             {
@@ -241,7 +265,7 @@ app.MapPost("/profile/batch", async (
                 totalValueUsd = ethValueUsd.HasValue ? ethValueUsd.Value + tokens.Where(t => t.ValueUsd.HasValue && !t.IsSpam).Sum(t => t.ValueUsd!.Value) : null;
             }
 
-            var risk = riskService.Assess(balanceTask.Result, txCountTask.Result, tokens, defiTask?.Result ?? [], activityTask?.Result ?? new WalletActivity());
+            var risk = riskService.Assess(balanceTask.Result, txCountTask.Result, tokens, defiTask?.Result ?? [], activity ?? new WalletActivity());
 
             var profile = new WalletProfile
             {
@@ -256,7 +280,7 @@ app.MapPost("/profile/batch", async (
                 TopTokens = tokens,
                 DeFiPositions = defiTask?.Result ?? [],
                 Risk = risk,
-                Activity = activityTask?.Result,
+                Activity = activity,
                 ProfiledAt = DateTime.UtcNow
             };
 
@@ -264,6 +288,9 @@ app.MapPost("/profile/batch", async (
             if (tier is "standard" or "premium")
             {
                 profile.PortfolioQuality = qualityService.Evaluate(profile);
+                if (topCounterparties != null && topCounterparties.Count > 0)
+                    profile.TopInteractions = labelService.LabelInteractions(topCounterparties);
+                profile.ApprovalRisk = await approvalService.ScanAsync(web3, address, tokens);
                 profile.AcpTrust = trustService.Evaluate(profile);
             }
             if (tier == "premium")
@@ -296,6 +323,94 @@ app.MapPost("/profile/batch", async (
     });
 });
 
+app.MapGet("/trust/{address}", async (
+    string address,
+    EthereumService ethService,
+    TokenService tokenService,
+    ProfileCacheService cacheService,
+    ILogger<Program> logger) =>
+{
+    address = address.Trim();
+    var chain = "ethereum";
+    var web3 = ethService.GetWeb3(chain);
+    var rpcUrl = ethService.GetRpcUrl(chain);
+
+    if (address.EndsWith(".eth"))
+    {
+        try
+        {
+            address = await ethService.ResolveEnsToAddressAsync(web3, address);
+        }
+        catch (Exception ex)
+        {
+            return Results.BadRequest(new { error = $"Could not resolve ENS name: {ex.Message}" });
+        }
+    }
+
+    // Fast parallel fetch — no metadata, no DeFi, no prices
+    var balanceTask = ethService.GetEthBalanceAsync(web3, address);
+    var txCountTask = ethService.GetTransactionCountAsync(web3, address);
+    var ensTask = ethService.ResolveEnsAsync(web3, address);
+    var tokenCountTask = tokenService.GetTokenCountAsync(rpcUrl, address);
+
+    await Task.WhenAll(balanceTask, txCountTask, ensTask, tokenCountTask);
+
+    var ethBalance = balanceTask.Result;
+    var txCount = txCountTask.Result;
+    var ensName = ensTask.Result;
+    var tokenCount = tokenCountTask.Result;
+
+    // Quick trust scoring
+    var score = 0;
+    var factors = new List<string>();
+
+    // Transaction depth (max 35)
+    if (txCount > 1000) { score += 35; factors.Add($"Deep history {txCount} txs (+35)"); }
+    else if (txCount > 500) { score += 30; factors.Add($"Strong history {txCount} txs (+30)"); }
+    else if (txCount > 100) { score += 25; factors.Add($"Good history {txCount} txs (+25)"); }
+    else if (txCount > 50) { score += 20; factors.Add($"Moderate history {txCount} txs (+20)"); }
+    else if (txCount > 20) { score += 15; factors.Add($"Some history {txCount} txs (+15)"); }
+    else if (txCount > 5) { score += 10; factors.Add($"Light history {txCount} txs (+10)"); }
+    else if (txCount > 0) { score += 5; factors.Add($"Minimal history {txCount} txs (+5)"); }
+
+    // ETH balance (max 25)
+    if (ethBalance > 10) { score += 25; factors.Add($"Large ETH balance {ethBalance:F2} (+25)"); }
+    else if (ethBalance > 1) { score += 20; factors.Add($"Good ETH balance {ethBalance:F2} (+20)"); }
+    else if (ethBalance > 0.1m) { score += 15; factors.Add($"Some ETH balance {ethBalance:F4} (+15)"); }
+    else if (ethBalance > 0.01m) { score += 10; factors.Add($"Small ETH balance (+10)"); }
+    else if (ethBalance > 0) { score += 5; factors.Add("Minimal ETH balance (+5)"); }
+
+    // ENS (max 20)
+    if (ensName != null) { score += 20; factors.Add($"ENS: {ensName} (+20)"); }
+
+    // Token holdings (max 20)
+    if (tokenCount > 20) { score += 20; factors.Add($"Diverse portfolio {tokenCount} tokens (+20)"); }
+    else if (tokenCount > 5) { score += 10; factors.Add($"Some tokens {tokenCount} (+10)"); }
+    else if (tokenCount > 0) { score += 5; factors.Add($"Few tokens {tokenCount} (+5)"); }
+
+    score = Math.Clamp(score, 0, 100);
+
+    var level = score switch
+    {
+        >= 80 => "high",
+        >= 60 => "moderate",
+        >= 30 => "low",
+        _ => "untrusted"
+    };
+
+    return Results.Ok(new TrustCheckResponse
+    {
+        Address = address,
+        EnsName = ensName,
+        EthBalance = ethBalance,
+        TransactionCount = txCount,
+        TokenCount = tokenCount,
+        TrustScore = score,
+        TrustLevel = level,
+        Factors = factors
+    });
+});
+
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
 app.MapGet("/tiers", () => Results.Ok(new
@@ -308,7 +423,7 @@ app.MapGet("/tiers", () => Results.Ok(new
     standard = new
     {
         fee = "0.001 ETH",
-        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score" }
+        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels" }
     },
     premium = new
     {

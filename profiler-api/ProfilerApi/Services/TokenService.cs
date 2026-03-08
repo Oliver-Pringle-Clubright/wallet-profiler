@@ -105,6 +105,23 @@ public class TokenService
         }
     }
 
+    /// <summary>
+    /// Quick token count — calls getTokenBalances but skips metadata resolution.
+    /// Used by the fast /trust endpoint.
+    /// </summary>
+    public async Task<int> GetTokenCountAsync(string rpcUrl, string address)
+    {
+        try
+        {
+            var tokens = await GetAlchemyTokenBalancesAsync(rpcUrl, address);
+            return tokens.Count;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     private async Task<List<AlchemyToken>> GetAlchemyTokenBalancesAsync(string rpcUrl, string address)
     {
         var request = new

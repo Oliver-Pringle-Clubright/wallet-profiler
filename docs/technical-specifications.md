@@ -1,4 +1,4 @@
-# Wallet Profiler v1.1 — Technical Specifications
+# Wallet Profiler v1.2 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -41,6 +41,8 @@ wallet-profiler/
 │           ├── WalletTaggingService.cs   # Wallet classification tags
 │           ├── PortfolioQualityService.cs # Portfolio quality grading
 │           ├── AcpTrustService.cs        # ACP trust score for agent commerce
+│           ├── ApprovalScannerService.cs # ERC-20 approval risk scanning
+│           ├── ContractLabelService.cs   # Known contract address labeling
 │           ├── SummaryService.cs         # Natural language summary generation
 │           └── ProfileCacheService.cs    # In-memory cache with tiered TTLs
 ├── acp-service/                          # TypeScript ACP proxy
@@ -89,6 +91,23 @@ wallet-profiler/
 
 **Concurrency:** Up to 5 addresses processed in parallel. Cached profiles return instantly.
 
+### GET /trust/{address}
+
+**Lightweight pre-transaction trust check.** No tier parameter — always returns minimal data for fast scoring.
+
+| Field | Type | Description |
+|---|---|---|
+| `address` | string | Resolved wallet address |
+| `ensName` | string? | ENS name if exists |
+| `ethBalance` | decimal | ETH balance |
+| `transactionCount` | int | Total tx count |
+| `tokenCount` | int | Number of non-zero ERC-20 balances |
+| `trustScore` | int | Quick trust score (0-100) |
+| `trustLevel` | string | `untrusted`, `low`, `moderate`, `high` |
+| `factors` | string[] | Scoring breakdown |
+
+**Response time:** ~500ms (4 parallel RPC calls, no metadata resolution).
+
 ### GET /tiers
 
 Returns the pricing and feature breakdown for all tiers.
@@ -116,6 +135,8 @@ interface WalletProfile {
   tags: string[];                   // all tiers
   portfolioQuality: PortfolioQuality | null;  // standard+
   acpTrust: AcpTrustScore | null;   // standard+
+  approvalRisk: ApprovalRisk | null; // standard+
+  topInteractions: ContractInteraction[]; // standard+
   summary: string | null;           // premium only
   profiledAt: string;
 }
@@ -163,6 +184,42 @@ interface AcpTrustScore {
   score: number;             // 0-100
   level: string;             // "untrusted" | "low" | "moderate" | "high"
   factors: string[];         // contributing signals with point values
+}
+
+interface ApprovalRisk {
+  totalApprovals: number;
+  unlimitedApprovals: number;
+  highRiskApprovals: number;
+  riskLevel: string;            // "safe" | "low" | "caution" | "danger"
+  approvals: TokenApproval[];
+}
+
+interface TokenApproval {
+  tokenSymbol: string;
+  tokenAddress: string;
+  spenderAddress: string;
+  spenderLabel: string;
+  spenderCategory: string;
+  isUnlimited: boolean;
+  riskLevel: string;
+}
+
+interface ContractInteraction {
+  address: string;
+  label: string | null;         // null = unknown contract
+  category: string | null;      // "dex" | "nft" | "lending" | "bridge" | "staking" | "mixer" | etc.
+  transactionCount: number;
+}
+
+interface TrustCheckResponse {
+  address: string;
+  ensName: string | null;
+  ethBalance: number;
+  transactionCount: number;
+  tokenCount: number;
+  trustScore: number;           // 0-100
+  trustLevel: string;           // "untrusted" | "low" | "moderate" | "high"
+  factors: string[];
 }
 
 interface BatchProfileResponse {
@@ -319,6 +376,49 @@ Pre-transaction trust evaluation for agent-to-agent commerce. Scores 0–100:
 
 **Levels:** high (80+), moderate (60+), low (30+), untrusted (<30)
 
+### 5.10 ApprovalScannerService
+
+Checks ERC-20 `allowance(owner, spender)` on the top 10 non-spam tokens against 7 known DEX/protocol spenders. Uses Nethereum contract query handler with a concurrency limit of 10 parallel calls.
+
+**Known spenders checked:**
+
+| Contract | Label |
+|---|---|
+| `0x7a25...488D` | Uniswap V2 Router |
+| `0xE592...1564` | Uniswap V3 Router |
+| `0x3fC9...7FAD` | Uniswap Universal Router |
+| `0xd9e1...378B` | SushiSwap Router |
+| `0x1111...0582` | 1inch V5 Router |
+| `0xDef1...25EfF` | 0x Exchange Proxy |
+| `0x0000...14dC` | OpenSea Seaport |
+
+**Risk classification:** Unlimited approval (> 10^30) to a known DEX = "caution". Any non-zero limited approval = "safe". Overall risk escalates with unlimited approval count.
+
+### 5.11 ContractLabelService
+
+Static dictionary of 45+ known Ethereum mainnet contracts with labels and categories. Used to enrich top counterparty addresses from ActivityService.
+
+**Categories:** `dex`, `nft`, `lending`, `bridge`, `staking`, `mixer`, `token`, `governance`, `identity`, `system`.
+
+### 5.12 Quick Trust Endpoint
+
+Lightweight `GET /trust/{address}` endpoint that scores wallets without full profile analysis.
+
+**Data fetched (4 parallel RPC calls):**
+- ETH balance via `eth_getBalance`
+- Transaction count via `eth_getTransactionCount`
+- ENS reverse resolution (cached)
+- Token count via `alchemy_getTokenBalances` (count only, no metadata)
+
+**Scoring (max 100):**
+
+| Factor | Max Points | Criteria |
+|---|---|---|
+| Transaction count | 35 | 1000+ = 35, 500+ = 30, 100+ = 25, 50+ = 20, 20+ = 15, 5+ = 10 |
+| ETH balance | 25 | 10+ = 25, 1+ = 20, 0.1+ = 15, 0.01+ = 10, >0 = 5 |
+| ENS identity | 20 | Has ENS name = 20 |
+| Token diversity | 20 | 20+ = 20, 5+ = 10, >0 = 5 |
+
 ## 6. Tiered Request Flow
 
 ```
@@ -337,6 +437,8 @@ Pre-transaction trust evaluation for agent-to-agent commerce. Scores 0–100:
   Activity         ○               ●               ●
   USD prices       ○               ●               ●
   Portfolio quality○               ●               ●
+  Approval scan    ○               ●               ●
+  Contract labels  ○               ●               ●
   ACP trust score  ○               ●               ●
   Summary          ○               ○               ●
                    │               │               │
