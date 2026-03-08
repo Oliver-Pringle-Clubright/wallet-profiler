@@ -26,6 +26,7 @@ public class WalletProfile
     public RevokeRecommendations? RevokeAdvice { get; set; }
     public SanctionsCheck? Sanctions { get; set; }
     public SmartMoneySignal? SmartMoney { get; set; }
+    public MevExposure? MevExposure { get; set; }
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -366,6 +367,70 @@ public class MonitorPlan
     public int MaxSubscriptions { get; set; }
     public int PollIntervalSeconds { get; set; }
     public bool IncludesBalanceAlerts { get; set; }
+}
+
+// --- v1.7: MEV Detection ---
+
+public class MevExposure
+{
+    public int SandwichAttacks { get; set; }
+    public int FrontrunTransactions { get; set; }
+    public int BackrunTransactions { get; set; }
+    public decimal? EstimatedLossUsd { get; set; }
+    public string RiskLevel { get; set; } = "none"; // none, low, moderate, high
+    public List<MevIncident> RecentIncidents { get; set; } = [];
+}
+
+public class MevIncident
+{
+    public string TxHash { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty; // sandwich, frontrun, backrun
+    public string TokenSymbol { get; set; } = string.Empty;
+    public decimal? LossUsd { get; set; }
+    public DateTime Timestamp { get; set; }
+}
+
+// --- v1.7: Reputation NFT ---
+
+public class ReputationBadge
+{
+    public string Address { get; set; } = string.Empty;
+    public int TrustScore { get; set; }
+    public string TrustLevel { get; set; } = "untrusted";
+    public string Classification { get; set; } = "unknown"; // whale, trader, defi_native, hodler, newcomer
+    public int WalletAgeDays { get; set; }
+    public int TransactionCount { get; set; }
+    public string? EnsName { get; set; }
+    public List<string> Tags { get; set; } = [];
+    public DateTime IssuedAt { get; set; } = DateTime.UtcNow;
+    public string BadgeUri { get; set; } = string.Empty; // JSON metadata URI
+}
+
+// --- v1.7: Enterprise Bulk Pricing ---
+
+public class EnterprisePricingPlan
+{
+    public string Plan { get; set; } = string.Empty;
+    public decimal MonthlyFeeEth { get; set; }
+    public int IncludedProfiles { get; set; }
+    public decimal OverageFeeEth { get; set; }
+    public string SupportLevel { get; set; } = string.Empty;
+    public List<string> Features { get; set; } = [];
+}
+
+// --- v1.7: Freemium Tier ---
+
+public class FreemiumProfile
+{
+    public string Address { get; set; } = string.Empty;
+    public string? EnsName { get; set; }
+    public decimal EthBalance { get; set; }
+    public int TransactionCount { get; set; }
+    public int TokenCount { get; set; }
+    public string RiskLevel { get; set; } = "unknown";
+    public List<string> Tags { get; set; } = [];
+    public string UpgradeHint { get; set; } = "Upgrade to basic tier for full token details and spam detection.";
+    public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
 // --- v1.3: Cross-Chain Aggregated Profile ---

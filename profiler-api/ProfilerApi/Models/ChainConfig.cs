@@ -30,6 +30,53 @@ public class ChainConfig
             Name = "arbitrum",
             RpcUrl = "https://arb-mainnet.g.alchemy.com/v2/{API_KEY}",
             ChainId = 42161
+        },
+        // v1.7: Multi-chain expansion
+        ["polygon"] = new ChainConfig
+        {
+            Name = "polygon",
+            RpcUrl = "https://polygon-mainnet.g.alchemy.com/v2/{API_KEY}",
+            ChainId = 137
+        },
+        ["optimism"] = new ChainConfig
+        {
+            Name = "optimism",
+            RpcUrl = "https://opt-mainnet.g.alchemy.com/v2/{API_KEY}",
+            ChainId = 10
+        },
+        ["avalanche"] = new ChainConfig
+        {
+            Name = "avalanche",
+            RpcUrl = "https://avax-mainnet.g.alchemy.com/v2/{API_KEY}",
+            ChainId = 43114
+        },
+        ["bnb"] = new ChainConfig
+        {
+            Name = "bnb",
+            RpcUrl = "https://bnb-mainnet.g.alchemy.com/v2/{API_KEY}",
+            ChainId = 56
         }
+    };
+
+    /// <summary>
+    /// Native token symbol per chain (v1.7).
+    /// </summary>
+    public static string GetNativeSymbol(string chain) => chain switch
+    {
+        "polygon" => "MATIC",
+        "avalanche" => "AVAX",
+        "bnb" => "BNB",
+        _ => "ETH"
+    };
+
+    /// <summary>
+    /// DeFi Llama price key for native token (v1.7).
+    /// </summary>
+    public static string GetNativePriceKey(string chain) => chain switch
+    {
+        "polygon" => "coingecko:matic-network",
+        "avalanche" => "coingecko:avalanche-2",
+        "bnb" => "coingecko:binancecoin",
+        _ => "coingecko:ethereum"
     };
 }

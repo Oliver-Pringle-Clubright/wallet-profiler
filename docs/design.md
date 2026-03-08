@@ -1,4 +1,4 @@
-# Wallet Profiler v1.6 — Design Document
+# Wallet Profiler v1.7 — Design Document
 
 ## 1. Problem Statement
 
@@ -276,3 +276,25 @@ Automatically records portfolio snapshots when profiles are built (standard+ tie
 ### Recurring Webhook Subscription Plans
 
 Added tiered subscription plans for the whale movement monitor: free (1 subscription, 60s poll), basic (10 subs, 30s poll, 0.01 ETH/month), and premium (100 subs, 15s poll, 0.05 ETH/month). `GET /monitor/plans` returns available plans. Creates a recurring revenue stream.
+
+## 12. v1.7 New Features
+
+### Freemium Tier
+
+`POST /profile` with `tier: "free"` returns a lightweight profile (ETH balance, tx count, token count, risk level, basic tags) at zero cost. Designed as a funnel to convert agents and users to paid tiers. Includes an `upgradeHint` field suggesting the benefits of upgrading.
+
+### Multi-Chain Expansion
+
+Added support for Polygon (137), Optimism (10), Avalanche (43114), and BNB Chain (56) via Alchemy RPC. Each chain has its own native token symbol and DeFi Llama price key. `GET /chains` endpoint lists all supported chains with chain IDs and native tokens. Total supported chains: 7.
+
+### MEV Detection
+
+Analyzes a wallet's transaction history for MEV exposure — sandwich attacks, frontrunning, and backrunning. Checks transactions against a database of known MEV bot addresses. Returns risk level, incident count, and estimated losses. Available on standard+ tiers.
+
+### On-Chain Reputation Badge
+
+`GET /reputation/{address}` generates ERC-721 compatible metadata for a soulbound reputation NFT. Combines trust score, classification (whale, trader, defi_native, hodler, newcomer), wallet age, tags, and portfolio value into a badge with a base64-encoded JSON metadata URI. Enables on-chain identity verification.
+
+### Bulk Enterprise Pricing
+
+`GET /pricing/enterprise` returns three enterprise plans: starter (0.5 ETH/month, 1K profiles), growth (2 ETH/month, 5K profiles), and enterprise (10 ETH/month, 50K profiles). Each plan includes different rate limits, support levels, and features. Creates a high-value recurring revenue channel.

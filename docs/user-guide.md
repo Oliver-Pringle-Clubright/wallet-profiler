@@ -1,4 +1,4 @@
-# Wallet Profiler v1.6 — User Guide
+# Wallet Profiler v1.7 — User Guide
 
 ## Overview
 
@@ -8,11 +8,15 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 
 ## Supported Chains
 
-| Chain | Chain ID | Status |
-|---|---|---|
-| Ethereum Mainnet | 1 | Fully supported |
-| Base | 8453 | Supported (requires Basescan API key) |
-| Arbitrum One | 42161 | Supported (requires Arbiscan API key) |
+| Chain | Chain ID | Native Token | Status |
+|---|---|---|---|
+| Ethereum Mainnet | 1 | ETH | Fully supported |
+| Base | 8453 | ETH | Supported |
+| Arbitrum One | 42161 | ETH | Supported |
+| Polygon | 137 | MATIC | Supported (v1.7) |
+| Optimism | 10 | ETH | Supported (v1.7) |
+| Avalanche | 43114 | AVAX | Supported (v1.7) |
+| BNB Chain | 56 | BNB | Supported (v1.7) |
 
 ## Service Tiers
 
@@ -310,6 +314,7 @@ curl http://localhost:5000/tiers
 | `revokeAdvice` | object? | Std+ | Approval revocation recommendations |
 | `sanctions` | object? | Std+ | OFAC sanctions screening results |
 | `smartMoney` | object? | Std+ | Smart money classification and analysis |
+| `mevExposure` | object? | Std+ | MEV exposure detection results |
 | `summary` | string? | Premium | Natural language wallet summary |
 
 ### Wallet Tags
@@ -515,6 +520,60 @@ curl http://localhost:5000/monitor/plans
 | Free | 0 ETH/month | 1 | 60s | No |
 | Basic | 0.01 ETH/month | 10 | 30s | Yes |
 | Premium | 0.05 ETH/month | 100 | 15s | Yes |
+
+### Freemium Tier (v1.7)
+
+Use `tier: "free"` for a zero-cost lightweight profile:
+
+```bash
+curl -X POST http://localhost:5000/profile \
+  -H "Content-Type: application/json" \
+  -d '{"address":"vitalik.eth","tier":"free"}'
+```
+
+Returns: ETH balance, transaction count, token count, risk level, basic tags, and an upgrade hint. No token details, no USD prices.
+
+### MEV Exposure Detection (v1.7)
+
+Available on standard and premium tiers. Detects MEV attacks affecting the wallet.
+
+| Field | Description |
+|---|---|
+| `mevExposure.sandwichAttacks` | Number of sandwich attacks detected |
+| `mevExposure.frontrunTransactions` | Frontrun transactions detected |
+| `mevExposure.estimatedLossUsd` | Estimated loss from MEV attacks |
+| `mevExposure.riskLevel` | `none`, `low`, `moderate`, or `high` |
+| `mevExposure.recentIncidents` | Last 10 MEV incidents |
+
+### Reputation Badge (v1.7)
+
+**Endpoint:** `GET /reputation/{address}`
+
+Generates ERC-721 compatible metadata for an on-chain reputation NFT.
+
+```bash
+curl http://localhost:5000/reputation/vitalik.eth
+```
+
+Returns trust score, classification, wallet age, tags, and a `badgeUri` containing base64-encoded JSON metadata suitable for minting as a soulbound NFT.
+
+### Supported Chains (v1.7)
+
+**Endpoint:** `GET /chains`
+
+Lists all supported chains with chain IDs and native token symbols.
+
+### Enterprise Pricing (v1.7)
+
+**Endpoint:** `GET /pricing/enterprise`
+
+Returns available enterprise subscription plans for high-volume API access.
+
+| Plan | Monthly Fee | Included Profiles | Support |
+|---|---|---|---|
+| Starter | 0.5 ETH | 1,000 | Email |
+| Growth | 2 ETH | 5,000 | Priority |
+| Enterprise | 10 ETH | 50,000 | Dedicated |
 
 ### Risk Score Interpretation
 

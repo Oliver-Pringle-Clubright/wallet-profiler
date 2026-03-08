@@ -33,6 +33,7 @@ builder.Services.AddSingleton<SlaTrackingService>();
 builder.Services.AddSingleton<SanctionsService>();
 builder.Services.AddSingleton<SmartMoneyService>();
 builder.Services.AddSingleton<SnapshotService>();
+builder.Services.AddSingleton<ReputationBadgeService>();
 builder.Services.AddScoped<ProfileOrchestrator>();
 builder.Services.AddSingleton<MonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorService>());
@@ -42,6 +43,7 @@ builder.Services.AddHttpClient<PriceService>();
 builder.Services.AddHttpClient<NftService>();
 builder.Services.AddHttpClient<TransferHistoryService>();
 builder.Services.AddHttpClient<TokenHolderService>();
+builder.Services.AddHttpClient<MevDetectionService>();
 
 var app = builder.Build();
 
@@ -91,14 +93,21 @@ app.MapPost("/profile", async (
     if (string.IsNullOrEmpty(address))
         return Results.BadRequest(new { error = "Address is required" });
 
-    if (tier is not ("basic" or "standard" or "premium"))
-        return Results.BadRequest(new { error = "Tier must be one of: basic, standard, premium" });
+    if (tier is not ("free" or "basic" or "standard" or "premium"))
+        return Results.BadRequest(new { error = "Tier must be one of: free, basic, standard, premium" });
 
     using var tracker = sla.Track($"profile_{tier}");
     try
     {
         if (address.EndsWith(".eth"))
             address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        // Freemium tier returns a lightweight profile (v1.7)
+        if (tier == "free")
+        {
+            var freemium = await orchestrator.BuildFreemiumAsync(address, chain);
+            return Results.Ok(freemium);
+        }
 
         var profile = await orchestrator.BuildProfileAsync(address, chain, tier);
         return Results.Ok(profile);
@@ -126,8 +135,8 @@ app.MapPost("/profile/batch", async (
     var chain = request.Chain.ToLowerInvariant();
     var tier = request.Tier.ToLowerInvariant();
 
-    if (tier is not ("basic" or "standard" or "premium"))
-        return Results.BadRequest(new { error = "Tier must be one of: basic, standard, premium" });
+    if (tier is not ("free" or "basic" or "standard" or "premium"))
+        return Results.BadRequest(new { error = "Tier must be one of: free, basic, standard, premium" });
 
     using var tracker = sla.Track("profile_batch");
     var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -182,8 +191,8 @@ app.MapPost("/profile/multi-chain", async (
     if (string.IsNullOrEmpty(address))
         return Results.BadRequest(new { error = "Address is required" });
 
-    if (tier is not ("basic" or "standard" or "premium"))
-        return Results.BadRequest(new { error = "Tier must be one of: basic, standard, premium" });
+    if (tier is not ("free" or "basic" or "standard" or "premium"))
+        return Results.BadRequest(new { error = "Tier must be one of: free, basic, standard, premium" });
 
     if (request.Chains.Count == 0)
         return Results.BadRequest(new { error = "At least one chain is required" });
@@ -414,6 +423,79 @@ app.MapGet("/monitor/plans", () =>
     return Results.Ok(MonitorService.GetPlans());
 });
 
+// --- GET /reputation/{address} (v1.7) ---
+app.MapGet("/reputation/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    ReputationBadgeService badgeService,
+    SlaTrackingService sla) =>
+{
+    using var tracker = sla.Track("reputation");
+    try
+    {
+        var resolved = address.Trim();
+        if (resolved.EndsWith(".eth"))
+            resolved = await orchestrator.ResolveAddressAsync(resolved, "ethereum");
+
+        var profile = await orchestrator.BuildProfileAsync(resolved, "ethereum", "standard");
+        var badge = badgeService.GenerateBadge(profile);
+        return Results.Ok(badge);
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// --- GET /pricing/enterprise (v1.7) ---
+app.MapGet("/pricing/enterprise", () =>
+{
+    var plans = new List<EnterprisePricingPlan>
+    {
+        new()
+        {
+            Plan = "starter",
+            MonthlyFeeEth = 0.5m,
+            IncludedProfiles = 1000,
+            OverageFeeEth = 0.0008m,
+            SupportLevel = "email",
+            Features = ["All standard tier features", "API key with 100 req/min", "Email support"]
+        },
+        new()
+        {
+            Plan = "growth",
+            MonthlyFeeEth = 2m,
+            IncludedProfiles = 5000,
+            OverageFeeEth = 0.0006m,
+            SupportLevel = "priority",
+            Features = ["All premium tier features", "API key with 500 req/min", "Priority support", "Custom webhooks", "Bulk batch (100 addresses)"]
+        },
+        new()
+        {
+            Plan = "enterprise",
+            MonthlyFeeEth = 10m,
+            IncludedProfiles = 50000,
+            OverageFeeEth = 0.0003m,
+            SupportLevel = "dedicated",
+            Features = ["All premium tier features", "Unlimited rate", "Dedicated support", "Custom integrations", "SLA guarantee (99.9%)", "White-label option"]
+        }
+    };
+    return Results.Ok(plans);
+});
+
+// --- GET /chains (v1.7) ---
+app.MapGet("/chains", () =>
+{
+    var chains = ChainConfig.Chains.Select(c => new
+    {
+        name = c.Key,
+        chainId = c.Value.ChainId,
+        nativeToken = ChainConfig.GetNativeSymbol(c.Key)
+    });
+    return Results.Ok(chains);
+});
+
 // --- GET /sla (v1.5) ---
 app.MapGet("/sla", (SlaTrackingService sla, ProfileCacheService cache) =>
 {
@@ -435,6 +517,11 @@ app.MapGet("/health", (ProfileCacheService cache) => Results.Ok(new
 
 app.MapGet("/tiers", () => Results.Ok(new
 {
+    free = new
+    {
+        fee = "0 ETH",
+        includes = new[] { "ETH balance", "Transaction count", "Token count", "Risk level", "Basic tags", "Upgrade hints" }
+    },
     basic = new
     {
         fee = "0.0005 ETH",
@@ -443,7 +530,7 @@ app.MapGet("/tiers", () => Results.Ok(new
     standard = new
     {
         fee = "0.001 ETH",
-        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support", "Token transfer history timeline", "Similar wallet clustering", "Revoke recommendation engine", "OFAC sanctions screening", "Smart money analysis", "Portfolio snapshots & history" }
+        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support", "Token transfer history timeline", "Similar wallet clustering", "Revoke recommendation engine", "OFAC sanctions screening", "Smart money analysis", "Portfolio snapshots & history", "MEV exposure detection" }
     },
     premium = new
     {

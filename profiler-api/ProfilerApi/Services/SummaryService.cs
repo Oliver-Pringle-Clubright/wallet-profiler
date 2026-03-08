@@ -174,6 +174,17 @@ public class SummaryService
             parts.Add(smPart + ".");
         }
 
+        // MEV exposure
+        if (profile.MevExposure != null && profile.MevExposure.RiskLevel != "none")
+        {
+            var mevPart = $"MEV exposure: {profile.MevExposure.RiskLevel} risk";
+            if (profile.MevExposure.SandwichAttacks > 0)
+                mevPart += $" ({profile.MevExposure.SandwichAttacks} sandwich attack(s) detected)";
+            if (profile.MevExposure.EstimatedLossUsd > 0)
+                mevPart += $", estimated loss ~${profile.MevExposure.EstimatedLossUsd:F0}";
+            parts.Add(mevPart + ".");
+        }
+
         // Risk
         var riskPart = profile.Risk.Level switch
         {

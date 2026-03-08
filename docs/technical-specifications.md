@@ -1,4 +1,4 @@
-# Wallet Profiler v1.6 — Technical Specifications
+# Wallet Profiler v1.7 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -57,7 +57,9 @@ wallet-profiler/
 │           ├── SanctionsService.cs       # OFAC sanctions screening (v1.6)
 │           ├── SmartMoneyService.cs      # Smart money classification (v1.6)
 │           ├── TokenHolderService.cs     # Token holder analysis (v1.6)
-│           └── SnapshotService.cs        # Portfolio snapshot history (v1.6)
+│           ├── SnapshotService.cs        # Portfolio snapshot history (v1.6)
+│           ├── MevDetectionService.cs   # MEV exposure analysis (v1.7)
+│           └── ReputationBadgeService.cs # On-chain reputation badge (v1.7)
 ├── acp-service/                          # TypeScript ACP proxy
 │   ├── Dockerfile
 │   ├── package.json
@@ -154,6 +156,24 @@ Returns all active monitor subscriptions.
 
 Removes a monitor subscription by ID.
 
+### GET /reputation/{address} (v1.7)
+
+Generates an on-chain reputation badge (ERC-721 metadata) for a wallet.
+
+**Response:** `200 OK` — `ReputationBadge` JSON with base64 metadata URI.
+
+### GET /pricing/enterprise (v1.7)
+
+Returns available enterprise subscription plans.
+
+**Response:** `200 OK` — `EnterprisePricingPlan[]` JSON
+
+### GET /chains (v1.7)
+
+Lists all supported chains with chain IDs and native token symbols.
+
+**Response:** `200 OK` — Array of chain objects.
+
 ### GET /token/{contract}/holders (v1.6)
 
 Analyzes top holders of an ERC-20 token with trust scoring.
@@ -223,6 +243,7 @@ interface WalletProfile {
   revokeAdvice: RevokeRecommendations | null; // standard+
   sanctions: SanctionsCheck | null;  // standard+
   smartMoney: SmartMoneySignal | null; // standard+
+  mevExposure: MevExposure | null;  // standard+
   summary: string | null;           // premium only
   profiledAt: string;
 }
@@ -493,6 +514,57 @@ interface MonitorPlan {
   maxSubscriptions: number;
   pollIntervalSeconds: number;
   includesBalanceAlerts: boolean;
+}
+
+interface MevExposure {
+  sandwichAttacks: number;
+  frontrunTransactions: number;
+  backrunTransactions: number;
+  estimatedLossUsd: number | null;
+  riskLevel: string;              // "none" | "low" | "moderate" | "high"
+  recentIncidents: MevIncident[];
+}
+
+interface MevIncident {
+  txHash: string;
+  type: string;                   // "sandwich" | "frontrun" | "backrun"
+  tokenSymbol: string;
+  lossUsd: number | null;
+  timestamp: string;
+}
+
+interface ReputationBadge {
+  address: string;
+  trustScore: number;
+  trustLevel: string;
+  classification: string;         // "whale" | "trader" | "defi_native" | "hodler" | "newcomer" | "active_user"
+  walletAgeDays: number;
+  transactionCount: number;
+  ensName: string | null;
+  tags: string[];
+  issuedAt: string;
+  badgeUri: string;               // base64 data URI with ERC-721 JSON metadata
+}
+
+interface FreemiumProfile {
+  address: string;
+  ensName: string | null;
+  ethBalance: number;
+  transactionCount: number;
+  tokenCount: number;
+  riskLevel: string;
+  tags: string[];
+  upgradeHint: string;
+  profiledAt: string;
+}
+
+interface EnterprisePricingPlan {
+  plan: string;
+  monthlyFeeEth: number;
+  includedProfiles: number;
+  overageFeeEth: number;
+  supportLevel: string;
+  features: string[];
 }
 ```
 
@@ -807,6 +879,7 @@ Lightweight `GET /trust/{address}` endpoint that scores wallets without full pro
   Revoke advice    ○               ●               ●
   Sanctions screen ○               ●               ●
   Smart money      ○               ●               ●
+  MEV detection    ○               ●               ●
   Snapshots        ○               ●               ●
   Summary          ○               ○               ●
                    │               │               │
@@ -932,3 +1005,30 @@ In-memory portfolio snapshot storage using `ConcurrentDictionary`.
 **Snapshot data:** Address, total value USD, ETH balance, non-spam token count, transaction count, timestamp.
 
 **History query:** Returns snapshots within a configurable lookback period (default 30 days) with value change percentage calculation.
+
+### 5.26 MevDetectionService (v1.7)
+
+Analyzes wallet transactions for MEV (Maximal Extractable Value) exposure by checking against known MEV bot addresses and analyzing gas price patterns.
+
+**Known MEV bots tracked:** jaredfromsubway, and 4 other high-volume sandwich/frontrun bots.
+
+**Detection heuristics:**
+1. Direct interaction with known MEV bot addresses → sandwich/frontrun classification
+2. Multiple transactions in same block involving MEV bot → sandwich attack
+3. Abnormally high gas prices (>100 gwei) → potential frontrun victim
+
+**Risk levels:** none (0 incidents), low (1-2), moderate (3-5), high (6+).
+
+### 5.27 ReputationBadgeService (v1.7)
+
+Generates ERC-721 compatible soulbound NFT metadata from a wallet profile.
+
+**Classification logic:**
+- Total value > $1M → whale
+- DeFi positions + 100+ txs → defi_native
+- Smart money = active_trader → trader
+- 365+ days active + <50 txs → hodler
+- <10 txs → newcomer
+- Default → active_user
+
+**Badge metadata:** Follows OpenSea metadata standard with `name`, `description`, `image`, and `attributes` array. Encoded as a `data:application/json;base64,...` URI for on-chain storage.

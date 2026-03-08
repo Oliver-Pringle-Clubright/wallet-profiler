@@ -26,6 +26,7 @@ public class ProfileOrchestrator
     private readonly RevokeRecommendationService _revokeService;
     private readonly SanctionsService _sanctionsService;
     private readonly SmartMoneyService _smartMoneyService;
+    private readonly MevDetectionService _mevService;
     private readonly SnapshotService _snapshotService;
     private readonly ProfileCacheService _cacheService;
     private readonly ILogger<ProfileOrchestrator> _logger;
@@ -49,6 +50,7 @@ public class ProfileOrchestrator
         RevokeRecommendationService revokeService,
         SanctionsService sanctionsService,
         SmartMoneyService smartMoneyService,
+        MevDetectionService mevService,
         SnapshotService snapshotService,
         ProfileCacheService cacheService,
         ILogger<ProfileOrchestrator> logger)
@@ -71,6 +73,7 @@ public class ProfileOrchestrator
         _revokeService = revokeService;
         _sanctionsService = sanctionsService;
         _smartMoneyService = smartMoneyService;
+        _mevService = mevService;
         _snapshotService = snapshotService;
         _cacheService = cacheService;
         _logger = logger;
@@ -88,6 +91,52 @@ public class ProfileOrchestrator
         var resolved = await _ethService.ResolveEnsToAddressAsync(web3, address);
         _logger.LogInformation("Resolved ENS {Name} to {Address}", address, resolved);
         return resolved;
+    }
+
+    /// <summary>
+    /// Builds a freemium (free tier) lightweight profile. No token details, no USD prices.
+    /// </summary>
+    public async Task<FreemiumProfile> BuildFreemiumAsync(string address, string chain)
+    {
+        var web3 = _ethService.GetWeb3(chain);
+        var rpcUrl = _ethService.GetRpcUrl(chain);
+
+        var balanceTask = _ethService.GetEthBalanceAsync(web3, address);
+        var txCountTask = _ethService.GetTransactionCountAsync(web3, address);
+        var ensTask = _ethService.ResolveEnsAsync(web3, address);
+        var tokenCountTask = _tokenService.GetTokenCountAsync(rpcUrl, address);
+
+        await Task.WhenAll(balanceTask, txCountTask, ensTask, tokenCountTask);
+
+        var ethBalance = balanceTask.Result;
+        var txCount = txCountTask.Result;
+
+        // Simple risk level
+        var riskLevel = (txCount, ethBalance) switch
+        {
+            (0, _) => "high",
+            ( < 5, < 0.01m) => "high",
+            ( < 20, _) => "medium",
+            _ => "low"
+        };
+
+        // Basic tags
+        var tags = new List<string>();
+        if (ensTask.Result != null) tags.Add("ens-holder");
+        if (txCount > 100) tags.Add("active-trader");
+        if (ethBalance > 10) tags.Add("well-funded");
+        if (txCount == 0) tags.Add("fresh-wallet");
+
+        return new FreemiumProfile
+        {
+            Address = address,
+            EnsName = ensTask.Result,
+            EthBalance = ethBalance,
+            TransactionCount = txCount,
+            TokenCount = tokenCountTask.Result,
+            RiskLevel = riskLevel,
+            Tags = tags
+        };
     }
 
     /// <summary>
@@ -217,6 +266,9 @@ public class ProfileOrchestrator
 
             // Smart money analysis (v1.6)
             profile.SmartMoney = _smartMoneyService.Analyze(profile, profile.TransferHistory);
+
+            // MEV exposure detection (v1.7)
+            profile.MevExposure = await _mevService.AnalyzeAsync(address, chain);
         }
 
         // --- PREMIUM: natural language summary ---
