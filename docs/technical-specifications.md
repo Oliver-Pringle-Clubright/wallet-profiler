@@ -1,4 +1,4 @@
-# Wallet Profiler v1.4 — Technical Specifications
+# Wallet Profiler v1.5 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -8,7 +8,8 @@
 | **Ethereum RPC** | Nethereum.Web3 | 5.8.0 |
 | **ENS Resolution** | Nethereum.ENS | 5.8.0 |
 | **Smart Contract Reads** | Nethereum.Contracts | 5.8.0 |
-| **Caching** | Microsoft.Extensions.Caching.Memory | built-in |
+| **Caching (L1)** | Microsoft.Extensions.Caching.Memory | built-in |
+| **Caching (L2)** | StackExchange.Redis (optional) | 2.7.27 |
 | **ACP Runtime** | TypeScript / Node.js | Node 22+ |
 | **Containerization** | Docker / Docker Compose | Latest |
 | **Blockchain Data** | Alchemy JSON-RPC + Etherscan V2 | Latest |
@@ -50,7 +51,9 @@ wallet-profiler/
 │           ├── MonitorService.cs         # Whale movement webhook monitor (v1.3)
 │           ├── TransferHistoryService.cs # Token transfer timeline (v1.4)
 │           ├── WalletClusteringService.cs # Similar wallet discovery (v1.4)
-│           └── RevokeRecommendationService.cs # Approval revocation advisor (v1.4)
+│           ├── RevokeRecommendationService.cs # Approval revocation advisor (v1.4)
+│           ├── ApiKeyAuthService.cs      # API key auth + rate limiting (v1.5)
+│           └── SlaTrackingService.cs     # Response time SLA tracking (v1.5)
 ├── acp-service/                          # TypeScript ACP proxy
 │   ├── Dockerfile
 │   ├── package.json
@@ -147,13 +150,17 @@ Returns all active monitor subscriptions.
 
 Removes a monitor subscription by ID.
 
+### GET /sla (v1.5)
+
+Returns SLA compliance report with per-endpoint latency percentiles (p50/p95/p99), request counts, error rates, and SLA breach tracking. No authentication required.
+
 ### GET /tiers
 
 Returns the pricing and feature breakdown for all tiers.
 
 ### GET /health
 
-Returns `{ "status": "healthy" }`.
+Returns `{ "status": "healthy", "cacheBackend": "memory" | "redis" }`.
 
 ## 4. Data Models
 
@@ -608,7 +615,47 @@ Analyzes token approvals from ApprovalScannerService and generates prioritized r
 
 **Overall urgency:** Based on count of high-priority recommendations.
 
-### 5.18 Quick Trust Endpoint
+### 5.18 ApiKeyAuthService (v1.5)
+
+Optional API key authentication and rate limiting middleware. When `ApiKeys` are configured in appsettings, all endpoints (except `/health`, `/tiers`, `/sla`) require a valid `X-API-Key` header.
+
+**Configuration:** Each API key specifies name, tier, rate limit (requests per window), and window duration (seconds).
+
+**Rate limiting:** Sliding window algorithm using `ConcurrentDictionary`. Returns 429 when limit exceeded.
+
+**Dev mode:** When no API keys are configured, all requests pass through without authentication.
+
+### 5.19 ProfileCacheService — Redis Support (v1.5)
+
+L1/L2 cache architecture:
+- **L1 (always):** In-memory `IMemoryCache` — sub-millisecond reads
+- **L2 (optional):** Redis via `IDistributedCache` — persistent across restarts, shared across instances
+
+Redis is enabled when `Redis:ConnectionString` is configured. Profile data is stored in both L1 and L2. On cache miss in L1, L2 is checked and the result is promoted back to L1.
+
+ENS and price caches remain memory-only (fast, small, volatile).
+
+### 5.20 SlaTrackingService (v1.5)
+
+Tracks per-endpoint response time metrics with SLA compliance monitoring.
+
+**Metrics collected:** Total requests, success/error counts, latency percentiles (p50/p95/p99), min/max/avg, SLA breach count, SLA compliance percentage.
+
+**SLA targets:**
+
+| Endpoint | Target |
+|---|---|
+| `profile_basic` | 5,000ms |
+| `profile_standard` | 15,000ms |
+| `profile_premium` | 15,000ms |
+| `profile_batch` | 30,000ms |
+| `profile_multi_chain` | 30,000ms |
+| `trust` | 2,000ms |
+| `monitor` | 500ms |
+
+**Implementation:** `RequestTracker` disposable pattern auto-records latency on completion. Last 1,000 latencies retained per endpoint for percentile calculation.
+
+### 5.21 Quick Trust Endpoint
 
 Lightweight `GET /trust/{address}` endpoint that scores wallets without full profile analysis.
 
@@ -676,8 +723,25 @@ Lightweight `GET /trust/{address}` endpoint that scores wallets without full pro
 | `Etherscan:ApiKey` | Yes | Etherscan API key for activity data |
 | `Basescan:ApiKey` | No | Separate key for Base chain |
 | `Arbiscan:ApiKey` | No | Separate key for Arbitrum |
+| `Redis:ConnectionString` | No | Redis connection string (e.g., `localhost:6379`) |
+| `ApiKeys` | No | Array of API key objects for auth + rate limiting |
 
 > **Security:** Real API keys go in `appsettings.Development.json` (gitignored). Never commit secrets.
+
+**API Key configuration example (appsettings.Development.json):**
+```json
+{
+  "ApiKeys": [
+    {
+      "Key": "your-secret-key-here",
+      "Name": "Production Agent",
+      "Tier": "premium",
+      "RateLimit": 100,
+      "WindowSeconds": 60
+    }
+  ]
+}
+```
 
 ### ACP Offering (offering.json)
 

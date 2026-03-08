@@ -4,6 +4,18 @@ using ProfilerApi.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddMemoryCache();
+
+// Redis distributed cache (optional — falls back to memory if not configured)
+var redisConnection = builder.Configuration["Redis:ConnectionString"];
+if (!string.IsNullOrEmpty(redisConnection))
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnection;
+        options.InstanceName = "WalletProfiler:";
+    });
+}
+
 builder.Services.AddSingleton<ProfileCacheService>();
 builder.Services.AddSingleton<EthereumService>();
 builder.Services.AddSingleton<RiskScoringService>();
@@ -16,6 +28,8 @@ builder.Services.AddSingleton<ContractLabelService>();
 builder.Services.AddSingleton<ApprovalScannerService>();
 builder.Services.AddSingleton<RevokeRecommendationService>();
 builder.Services.AddSingleton<WalletClusteringService>();
+builder.Services.AddSingleton<ApiKeyAuthService>();
+builder.Services.AddSingleton<SlaTrackingService>();
 builder.Services.AddScoped<ProfileOrchestrator>();
 builder.Services.AddSingleton<MonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorService>());
@@ -27,10 +41,44 @@ builder.Services.AddHttpClient<TransferHistoryService>();
 
 var app = builder.Build();
 
+// --- API Key Authentication Middleware (v1.5) ---
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? "";
+
+    // Skip auth for health, tiers, and SLA endpoints
+    if (path is "/health" or "/tiers" or "/sla")
+    {
+        await next();
+        return;
+    }
+
+    var authService = context.RequestServices.GetRequiredService<ApiKeyAuthService>();
+    if (!authService.IsEnabled)
+    {
+        await next();
+        return;
+    }
+
+    var apiKey = context.Request.Headers["X-API-Key"].FirstOrDefault();
+    var (isValid, error, _) = authService.ValidateAndCheckRate(apiKey);
+
+    if (!isValid)
+    {
+        context.Response.StatusCode = error?.Contains("Rate limit") == true ? 429 : 401;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new { error });
+        return;
+    }
+
+    await next();
+});
+
 // --- POST /profile ---
 app.MapPost("/profile", async (
     ProfileRequest request,
-    ProfileOrchestrator orchestrator) =>
+    ProfileOrchestrator orchestrator,
+    SlaTrackingService sla) =>
 {
     var address = request.Address.Trim();
     var chain = request.Chain.ToLowerInvariant();
@@ -42,6 +90,7 @@ app.MapPost("/profile", async (
     if (tier is not ("basic" or "standard" or "premium"))
         return Results.BadRequest(new { error = "Tier must be one of: basic, standard, premium" });
 
+    using var tracker = sla.Track($"profile_{tier}");
     try
     {
         if (address.EndsWith(".eth"))
@@ -52,6 +101,7 @@ app.MapPost("/profile", async (
     }
     catch (Exception ex)
     {
+        tracker.MarkFailed();
         return Results.BadRequest(new { error = ex.Message });
     }
 });
@@ -60,6 +110,7 @@ app.MapPost("/profile", async (
 app.MapPost("/profile/batch", async (
     BatchProfileRequest request,
     ProfileOrchestrator orchestrator,
+    SlaTrackingService sla,
     ILogger<Program> logger) =>
 {
     if (request.Addresses.Count == 0)
@@ -74,6 +125,7 @@ app.MapPost("/profile/batch", async (
     if (tier is not ("basic" or "standard" or "premium"))
         return Results.BadRequest(new { error = "Tier must be one of: basic, standard, premium" });
 
+    using var tracker = sla.Track("profile_batch");
     var sw = System.Diagnostics.Stopwatch.StartNew();
 
     var semaphore = new SemaphoreSlim(5);
@@ -117,6 +169,7 @@ app.MapPost("/profile/batch", async (
 app.MapPost("/profile/multi-chain", async (
     MultiChainRequest request,
     ProfileOrchestrator orchestrator,
+    SlaTrackingService sla,
     ILogger<Program> logger) =>
 {
     var address = request.Address.Trim();
@@ -134,14 +187,13 @@ app.MapPost("/profile/multi-chain", async (
     if (request.Chains.Count > 5)
         return Results.BadRequest(new { error = "Maximum 5 chains per request" });
 
+    using var tracker = sla.Track("profile_multi_chain");
     try
     {
-        // Resolve ENS on ethereum if needed
         var resolvedAddress = address;
         if (address.EndsWith(".eth"))
             resolvedAddress = await orchestrator.ResolveAddressAsync(address, "ethereum");
 
-        // Profile all chains in parallel
         var chainTasks = request.Chains.Select(async chain =>
         {
             var c = chain.ToLowerInvariant();
@@ -191,6 +243,7 @@ app.MapPost("/profile/multi-chain", async (
     }
     catch (Exception ex)
     {
+        tracker.MarkFailed();
         return Results.BadRequest(new { error = ex.Message });
     }
 });
@@ -200,9 +253,10 @@ app.MapGet("/trust/{address}", async (
     string address,
     EthereumService ethService,
     TokenService tokenService,
-    ProfileCacheService cacheService,
+    SlaTrackingService sla,
     ILogger<Program> logger) =>
 {
+    using var tracker = sla.Track("trust");
     address = address.Trim();
     var chain = "ethereum";
     var web3 = ethService.GetWeb3(chain);
@@ -216,6 +270,7 @@ app.MapGet("/trust/{address}", async (
         }
         catch (Exception ex)
         {
+            tracker.MarkFailed();
             return Results.BadRequest(new { error = $"Could not resolve ENS name: {ex.Message}" });
         }
     }
@@ -281,8 +336,10 @@ app.MapGet("/trust/{address}", async (
 // --- POST /monitor (v1.3) ---
 app.MapPost("/monitor", (
     MonitorRequest request,
-    MonitorService monitorService) =>
+    MonitorService monitorService,
+    SlaTrackingService sla) =>
 {
+    using var tracker = sla.Track("monitor");
     if (string.IsNullOrEmpty(request.Address))
         return Results.BadRequest(new { error = "Address is required" });
 
@@ -308,8 +365,24 @@ app.MapDelete("/monitor/{id}", (string id, MonitorService monitorService) =>
     return Results.NotFound(new { error = $"Subscription {id} not found" });
 });
 
+// --- GET /sla (v1.5) ---
+app.MapGet("/sla", (SlaTrackingService sla, ProfileCacheService cache) =>
+{
+    var report = sla.GetReport();
+    return Results.Ok(new
+    {
+        report.GeneratedAt,
+        cacheBackend = cache.CacheBackend,
+        report.Endpoints
+    });
+});
+
 // --- Utility endpoints ---
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+app.MapGet("/health", (ProfileCacheService cache) => Results.Ok(new
+{
+    status = "healthy",
+    cacheBackend = cache.CacheBackend
+}));
 
 app.MapGet("/tiers", () => Results.Ok(new
 {

@@ -1,4 +1,4 @@
-# Wallet Profiler v1.4 — Design Document
+# Wallet Profiler v1.5 — Design Document
 
 ## 1. Problem Statement
 
@@ -233,5 +233,24 @@ Analyzes a wallet's top counterparties to find wallets with similar on-chain beh
 ### Revoke Recommendation Engine
 
 Analyzes existing token approvals and generates prioritized recommendations for which approvals to revoke. Classifies by risk: unlimited approvals to NFT marketplaces (common phishing vector) are high priority, unlimited to trusted DEX routers are medium, and limited approvals to known protocols are low. Agents can use this for security advisory services.
+
+## 10. v1.5 New Features
+
+### API Key Authentication & Rate Limiting
+
+Optional middleware that secures all endpoints with API key validation via `X-API-Key` header. Each key has a configurable rate limit using a sliding window algorithm. When no keys are configured (development mode), all requests pass through. This enables monetization beyond ACP — direct API access with per-key quotas.
+
+### Redis Cache (L2)
+
+Optional L2 cache layer using StackExchange.Redis. When configured, full wallet profiles are stored in both in-memory (L1) and Redis (L2). On L1 miss, L2 is checked and the result is promoted back to L1. This enables:
+- Persistent cache across server restarts
+- Shared cache across multiple API instances (horizontal scaling)
+- Cache survival during deployments
+
+ENS and price caches remain memory-only for speed.
+
+### Response Time SLA Tracking
+
+Every endpoint request is automatically instrumented with a `RequestTracker` that records latency, success/failure, and SLA compliance. The `GET /sla` endpoint exposes a real-time report with p50/p95/p99 percentiles, breach counts, and compliance percentages. This gives operators and buyers visibility into service reliability.
 
 Extracted ~100 lines of inline profile-building logic from `Program.cs` into a reusable `ProfileOrchestrator` service. Now shared by `/profile`, `/profile/batch`, and `/profile/multi-chain`, eliminating triple code duplication and making future features easier to add.

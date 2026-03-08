@@ -1,75 +1,146 @@
+using System.Text.Json;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using ProfilerApi.Models;
 
 namespace ProfilerApi.Services;
 
+/// <summary>
+/// Caching service with tiered TTLs. Supports both in-memory (default)
+/// and Redis (when Redis:ConnectionString is configured) backends.
+/// </summary>
 public class ProfileCacheService
 {
-    private readonly IMemoryCache _cache;
+    private readonly IMemoryCache _memCache;
+    private readonly IDistributedCache? _distCache;
     private readonly ILogger<ProfileCacheService> _logger;
+    private readonly bool _useRedis;
 
     // Cache durations
     private static readonly TimeSpan ProfileTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan EnsTtl = TimeSpan.FromHours(1);
     private static readonly TimeSpan PriceTtl = TimeSpan.FromMinutes(1);
 
-    public ProfileCacheService(IMemoryCache cache, ILogger<ProfileCacheService> logger)
+    private static readonly JsonSerializerOptions JsonOpts = new()
     {
-        _cache = cache;
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    public ProfileCacheService(
+        IMemoryCache cache,
+        ILogger<ProfileCacheService> logger,
+        IDistributedCache? distCache = null,
+        IConfiguration? config = null)
+    {
+        _memCache = cache;
         _logger = logger;
+        _distCache = distCache;
+
+        // Only use Redis if explicitly configured
+        _useRedis = !string.IsNullOrEmpty(config?["Redis:ConnectionString"]);
+        if (_useRedis)
+            _logger.LogInformation("Redis cache enabled");
     }
+
+    public string CacheBackend => _useRedis ? "redis" : "memory";
 
     // --- Full profile cache ---
 
     public WalletProfile? GetProfile(string address, string chain, string tier)
     {
         var key = ProfileKey(address, chain, tier);
-        if (_cache.TryGetValue(key, out WalletProfile? profile))
+
+        // Try memory cache first (L1)
+        if (_memCache.TryGetValue(key, out WalletProfile? profile))
         {
-            _logger.LogInformation("Cache HIT for profile {Address} ({Chain}/{Tier})", address, chain, tier);
+            _logger.LogInformation("Cache HIT (memory) for profile {Address} ({Chain}/{Tier})", address, chain, tier);
             return profile;
         }
+
+        // Try Redis (L2) if enabled
+        if (_useRedis && _distCache != null)
+        {
+            try
+            {
+                var json = _distCache.GetString(key);
+                if (json != null)
+                {
+                    profile = JsonSerializer.Deserialize<WalletProfile>(json, JsonOpts);
+                    if (profile != null)
+                    {
+                        // Promote to L1
+                        _memCache.Set(key, profile, ProfileTtl);
+                        _logger.LogInformation("Cache HIT (redis) for profile {Address} ({Chain}/{Tier})", address, chain, tier);
+                        return profile;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Redis GET failed for {Key}, falling back to memory", key);
+            }
+        }
+
         return null;
     }
 
     public void SetProfile(string address, string chain, string tier, WalletProfile profile)
     {
         var key = ProfileKey(address, chain, tier);
-        _cache.Set(key, profile, ProfileTtl);
+
+        // Always set in memory (L1)
+        _memCache.Set(key, profile, ProfileTtl);
+
+        // Also set in Redis (L2) if enabled
+        if (_useRedis && _distCache != null)
+        {
+            try
+            {
+                var json = JsonSerializer.Serialize(profile, JsonOpts);
+                _distCache.SetString(key, json, new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = ProfileTtl
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Redis SET failed for {Key}", key);
+            }
+        }
     }
 
-    // --- ENS cache ---
+    // --- ENS cache (memory only — fast, small) ---
 
     public bool TryGetEns(string address, out string? ensName)
     {
         var key = $"ens:{address.ToLowerInvariant()}";
-        return _cache.TryGetValue(key, out ensName);
+        return _memCache.TryGetValue(key, out ensName);
     }
 
     public void SetEns(string address, string? ensName)
     {
         var key = $"ens:{address.ToLowerInvariant()}";
-        _cache.Set(key, ensName, EnsTtl);
+        _memCache.Set(key, ensName, EnsTtl);
     }
 
     public bool TryGetEnsReverse(string ensName, out string? address)
     {
         var key = $"ens-reverse:{ensName.ToLowerInvariant()}";
-        return _cache.TryGetValue(key, out address);
+        return _memCache.TryGetValue(key, out address);
     }
 
     public void SetEnsReverse(string ensName, string address)
     {
         var key = $"ens-reverse:{ensName.ToLowerInvariant()}";
-        _cache.Set(key, address, EnsTtl);
+        _memCache.Set(key, address, EnsTtl);
     }
 
-    // --- Price cache ---
+    // --- Price cache (memory only — volatile, 1 min TTL) ---
 
     public bool TryGetPrices(string cacheKey, out (decimal? EthPrice, Dictionary<string, decimal> TokenPrices) prices)
     {
         var key = $"prices:{cacheKey}";
-        if (_cache.TryGetValue(key, out (decimal? EthPrice, Dictionary<string, decimal> TokenPrices) cached))
+        if (_memCache.TryGetValue(key, out (decimal? EthPrice, Dictionary<string, decimal> TokenPrices) cached))
         {
             prices = cached;
             return true;
@@ -81,7 +152,7 @@ public class ProfileCacheService
     public void SetPrices(string cacheKey, decimal? ethPrice, Dictionary<string, decimal> tokenPrices)
     {
         var key = $"prices:{cacheKey}";
-        _cache.Set(key, (ethPrice, tokenPrices), PriceTtl);
+        _memCache.Set(key, (ethPrice, tokenPrices), PriceTtl);
     }
 
     private static string ProfileKey(string address, string chain, string tier)

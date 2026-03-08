@@ -1,4 +1,4 @@
-# Wallet Profiler v1.4 — User Guide
+# Wallet Profiler v1.5 — User Guide
 
 ## Overview
 
@@ -465,11 +465,52 @@ Responses are cached in-memory for performance:
 
 Repeat requests for the same address/chain/tier within the TTL return instantly (~3ms vs ~10s uncached).
 
+### API Key Authentication (v1.5)
+
+When API keys are configured, all endpoints (except `/health`, `/tiers`, `/sla`) require an `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: your-key-here" \
+  -X POST http://localhost:5000/profile \
+  -H "Content-Type: application/json" \
+  -d '{"address":"vitalik.eth"}'
+```
+
+**Rate limiting:** Each API key has a configurable rate limit. Exceeding it returns `429 Too Many Requests`.
+
+**Development mode:** When no API keys are configured in appsettings, all requests pass through without authentication.
+
+### Redis Cache (v1.5)
+
+To enable Redis as an L2 cache, add the connection string to `appsettings.Development.json`:
+
+```json
+{
+  "Redis": {
+    "ConnectionString": "localhost:6379"
+  }
+}
+```
+
+The health endpoint shows the active cache backend:
+```bash
+curl http://localhost:5000/health
+# Returns: {"status":"healthy","cacheBackend":"redis"}
+```
+
+### SLA Monitoring (v1.5)
+
+```bash
+curl http://localhost:5000/sla
+```
+
+Returns per-endpoint latency percentiles (p50/p95/p99), request counts, error rates, and SLA compliance tracking. Use this to monitor service performance.
+
 ### Health Check
 
 ```bash
 curl http://localhost:5000/health
-# Returns: {"status":"healthy"}
+# Returns: {"status":"healthy","cacheBackend":"memory"}
 ```
 
 ## Running as an AGDP Service
@@ -511,6 +552,18 @@ See [DEPLOY.md](../DEPLOY.md) for full deployment instructions.
 **Multi-chain returns empty profiles for some chains:**
 - The wallet may not have activity on that chain
 - Ensure Alchemy supports the requested chain
+
+**401 Unauthorized:**
+- API keys are configured but no `X-API-Key` header was sent
+- Check that your key matches one configured in appsettings
+
+**429 Too Many Requests:**
+- Rate limit exceeded for your API key
+- Wait for the rate window to reset (default 60 seconds)
+
+**Redis connection failed:**
+- Service continues to work with memory-only cache
+- Check Redis connection string in appsettings
 
 **Monitor webhook not firing:**
 - Verify the webhook URL is publicly accessible
