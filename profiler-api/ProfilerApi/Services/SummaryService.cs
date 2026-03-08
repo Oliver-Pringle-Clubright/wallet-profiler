@@ -1,0 +1,114 @@
+using ProfilerApi.Models;
+
+namespace ProfilerApi.Services;
+
+public class SummaryService
+{
+    public string Generate(WalletProfile profile)
+    {
+        var parts = new List<string>();
+
+        // Wallet identity
+        var identity = profile.EnsName != null
+            ? $"{profile.EnsName} ({Shorten(profile.Address)})"
+            : Shorten(profile.Address);
+
+        // Wallet age
+        var agePart = "";
+        if (profile.Activity?.FirstTransaction != null)
+        {
+            var age = DateTime.UtcNow - profile.Activity.FirstTransaction.Value;
+            agePart = age.TotalDays switch
+            {
+                > 1825 => $"active since {profile.Activity.FirstTransaction.Value.Year} ({age.TotalDays / 365:F0}+ years)",
+                > 365 => $"active since {profile.Activity.FirstTransaction.Value:MMM yyyy}",
+                > 30 => $"{age.TotalDays / 30:F0} months old",
+                _ => $"{age.TotalDays:F0} days old"
+            };
+        }
+        else
+        {
+            agePart = "no transaction history available";
+        }
+
+        // Portfolio value
+        var valuePart = profile.TotalValueUsd.HasValue
+            ? $"holding {FormatUsd(profile.TotalValueUsd.Value)} total"
+            : $"holding {profile.EthBalance:F4} ETH";
+
+        // Classify wallet size
+        var sizePart = profile.TotalValueUsd switch
+        {
+            > 1_000_000 => "whale wallet",
+            > 100_000 => "high-value wallet",
+            > 10_000 => "mid-range wallet",
+            > 1_000 => "small wallet",
+            > 0 => "micro wallet",
+            _ => "wallet"
+        };
+
+        parts.Add($"This is a {sizePart} ({agePart}), {valuePart}.");
+
+        // Asset breakdown
+        var nonSpamTokens = profile.TopTokens.Where(t => !t.IsSpam).ToList();
+        var pricedTokens = nonSpamTokens.Where(t => t.ValueUsd > 0).ToList();
+
+        if (profile.EthValueUsd > 0 || pricedTokens.Count > 0)
+        {
+            var breakdown = new List<string>();
+            if (profile.EthValueUsd > 0)
+                breakdown.Add($"{FormatUsd(profile.EthValueUsd.Value)} in ETH");
+
+            foreach (var token in pricedTokens.Take(3))
+                breakdown.Add($"{FormatUsd(token.ValueUsd!.Value)} in {token.Symbol}");
+
+            if (pricedTokens.Count > 3)
+                breakdown.Add($"{pricedTokens.Count - 3} other priced tokens");
+
+            parts.Add($"Portfolio breakdown: {string.Join(", ", breakdown)}.");
+        }
+
+        // Spam tokens
+        var spamCount = profile.TopTokens.Count(t => t.IsSpam);
+        if (spamCount > 0)
+            parts.Add($"{spamCount} spam/phishing token(s) detected and flagged.");
+
+        // DeFi
+        if (profile.DeFiPositions.Count > 0)
+        {
+            var protocols = profile.DeFiPositions.Select(p => p.Protocol).Distinct().ToList();
+            parts.Add($"Active DeFi positions on {string.Join(", ", protocols)}.");
+        }
+
+        // Activity
+        if (profile.Activity != null && profile.Activity.UniqueInteractions > 0)
+        {
+            parts.Add($"{profile.TransactionCount} transactions across {profile.Activity.UniqueInteractions} unique addresses, active on {profile.Activity.DaysActive} distinct days.");
+        }
+
+        // Risk
+        var riskPart = profile.Risk.Level switch
+        {
+            "low" => "Low risk — well-established wallet with no significant concerns.",
+            "medium" => $"Medium risk — {string.Join("; ", profile.Risk.Flags.Take(2))}.",
+            "high" => $"High risk — {string.Join("; ", profile.Risk.Flags.Take(3))}.",
+            "critical" => $"Critical risk — multiple red flags: {string.Join("; ", profile.Risk.Flags)}.",
+            _ => ""
+        };
+        if (!string.IsNullOrEmpty(riskPart))
+            parts.Add(riskPart);
+
+        return string.Join(" ", parts);
+    }
+
+    private static string Shorten(string address)
+        => address.Length > 10 ? $"{address[..6]}...{address[^4..]}" : address;
+
+    private static string FormatUsd(decimal value) => value switch
+    {
+        >= 1_000_000 => $"${value / 1_000_000:F2}M",
+        >= 1_000 => $"${value / 1_000:F1}K",
+        >= 1 => $"${value:F2}",
+        _ => $"${value:F4}"
+    };
+}

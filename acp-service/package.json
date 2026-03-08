@@ -1,0 +1,13 @@
+{
+  "name": "wallet-profiler-acp",
+  "version": "1.0.0",
+  "description": "ACP service wrapper for the Wallet Profiler C# API",
+  "type": "module",
+  "scripts": {
+    "setup": "acp setup",
+    "register": "acp sell create wallet-profiler",
+    "serve": "acp serve start",
+    "start": "npm run serve"
+  },
+  "dependencies": {}
+}

@@ -1,0 +1,35 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+
+## Node
+node_modules/
+npm-debug.log*
+
+## IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+## Environment / Secrets
+.env
+appsettings.Development.json
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Docker
+docker-compose.override.yml
+
+## Temp
+*.tmp
+*.log

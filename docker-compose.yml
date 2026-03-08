@@ -1,0 +1,23 @@
+services:
+  profiler-api:
+    build: ./profiler-api
+    ports:
+      - "5000:5000"
+    environment:
+      - Alchemy__ApiKey=${ALCHEMY_API_KEY}
+      - Etherscan__ApiKey=${ETHERSCAN_API_KEY}
+      - Basescan__ApiKey=${BASESCAN_API_KEY:-}
+      - Arbiscan__ApiKey=${ARBISCAN_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  acp-runtime:
+    build: ./acp-service
+    depends_on:
+      profiler-api:
+        condition: service_healthy
+    environment:
+      - PROFILER_API_URL=http://profiler-api:5000

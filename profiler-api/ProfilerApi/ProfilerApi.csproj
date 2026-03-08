@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.1" />
+    <PackageReference Include="Nethereum.Contracts" Version="5.8.0" />
+    <PackageReference Include="Nethereum.ENS" Version="5.8.0" />
+    <PackageReference Include="Nethereum.Web3" Version="5.8.0" />
+  </ItemGroup>
+
+</Project>

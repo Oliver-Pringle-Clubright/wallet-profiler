@@ -1,0 +1,25 @@
+{
+  "name": "wallet-profiler",
+  "description": "Comprehensive on-chain wallet profiler with tiered pricing. Basic: balances + risk score. Standard: + USD prices + DeFi + activity. Premium: + natural language summary. Supports Ethereum, Base, and Arbitrum. Spam token detection included at all tiers.",
+  "fee": "0.001",
+  "requirements": {
+    "type": "object",
+    "properties": {
+      "address": {
+        "type": "string",
+        "description": "Wallet address (0x...) or ENS name (e.g. vitalik.eth)"
+      },
+      "chain": {
+        "type": "string",
+        "enum": ["ethereum", "base", "arbitrum"],
+        "description": "Target chain (defaults to ethereum)"
+      },
+      "tier": {
+        "type": "string",
+        "enum": ["basic", "standard", "premium"],
+        "description": "Service tier: basic (0.0005 ETH), standard (0.001 ETH), premium (0.003 ETH). Defaults to standard."
+      }
+    },
+    "required": ["address"]
+  }
+}
