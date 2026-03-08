@@ -1,4 +1,4 @@
-# Wallet Profiler — Design Document
+# Wallet Profiler v1.1 — Design Document
 
 ## 1. Problem Statement
 
@@ -8,6 +8,7 @@ AI agents operating on-chain need reliable counterparty intelligence before tran
 - How much capital does this wallet control?
 - How active and established is this wallet?
 - What protocols does this wallet interact with?
+- Can I trust this counterparty for agent-to-agent commerce?
 
 Currently, no AGDP service provides this. Agents must either skip due diligence or build their own blockchain querying infrastructure. The Wallet Profiler fills this gap as a purchasable on-demand service.
 
@@ -19,6 +20,7 @@ Currently, no AGDP service provides this. Agents must either skip due diligence 
 | **Trading agents** | Assess whale wallets, track smart money |
 | **Security agents** | Flag suspicious wallets before interacting |
 | **Human users** | Quick portfolio overview via AGDP marketplace |
+| **Agent orchestrators** | Batch-profile multiple counterparties in one call |
 
 ## 3. Architecture
 
@@ -34,8 +36,10 @@ Currently, no AGDP service provides this. Agents must either skip due diligence 
                           │   ACP Seller Runtime     │
                           │   (TypeScript)           │
                           │   handlers.ts            │
+                          │   + batch support        │
                           └──────────┬──────────────┘
                                      │ HTTP POST /profile
+                                     │ HTTP POST /profile/batch
                           ┌──────────▼──────────────┐
                           │   Wallet Profiler API    │
                           │   (C# / ASP.NET)         │
@@ -75,16 +79,14 @@ The ACP runtime requires TypeScript handlers. Rather than rewrite the entire pro
 
 **2. Alchemy `getTokenBalances` for token discovery**
 
-Instead of discovering tokens from Etherscan transfer history (limited to recent 100 events), we use Alchemy's `alchemy_getTokenBalances` endpoint which returns ALL non-zero ERC-20 balances in a single RPC call. This catches tokens received long ago that would be missed by transfer history scanning. Token metadata (symbol, decimals) is fetched via `alchemy_getTokenMetadata`.
+Instead of discovering tokens from Etherscan transfer history (limited to recent 100 events), we use Alchemy's `alchemy_getTokenBalances` endpoint which returns ALL non-zero ERC-20 balances in a single RPC call. Token metadata (symbol, decimals) is fetched via `alchemy_getTokenMetadata` with tier-based caps for response time optimization.
 
 **3. Tiered pricing model**
 
 Three tiers allow buyers to pay only for what they need:
-- **Basic (0.0005 ETH):** Balance + tokens + risk — fastest, cheapest
-- **Standard (0.001 ETH):** + USD prices + DeFi + activity — most popular
-- **Premium (0.003 ETH):** + natural language summary — for AI agents that need a human-readable interpretation
-
-This maximizes revenue by serving both quick-check and deep-analysis use cases.
+- **Basic (0.0005 ETH):** Balance + tokens (15) + risk + tags — fastest, cheapest
+- **Standard (0.001 ETH):** + USD prices + DeFi + activity + portfolio quality + ACP trust — most popular
+- **Premium (0.003 ETH):** + natural language summary + full token coverage (50) — for AI agents that need a human-readable interpretation
 
 **4. Spam token detection**
 
@@ -104,7 +106,7 @@ Cache reduces response time from ~10s to ~3ms for repeat queries and cuts API ra
 
 **6. Natural language summary (premium tier)**
 
-Template-based summary generation produces human-readable wallet descriptions without requiring an LLM API call. This keeps latency low and costs zero. The summary classifies wallet size (micro/small/mid/high-value/whale), describes portfolio breakdown, flags spam, and interprets the risk score.
+Template-based summary generation produces human-readable wallet descriptions without requiring an LLM API call. Now includes wallet tags, portfolio quality grade, and ACP trust level in the summary narrative.
 
 **7. DeFi Llama for pricing (not CoinGecko)**
 
@@ -114,12 +116,32 @@ CoinGecko's free tier limits token price lookups to 1 contract per call. DeFi Ll
 
 Etherscan deprecated their V1 API in favor of V2, which uses a unified endpoint (`api.etherscan.io/v2/api`) with a `chainid` parameter. A single API key works across all chains.
 
+**9. Wallet tags for quick classification (v1.1)**
+
+Rather than requiring consumers to interpret raw numbers, the profiler assigns human-readable tags (whale, defi-user, veteran, dormant, etc.) that agents can use for quick decision-making. Tags are available on all tiers at zero extra cost since they're derived from data already fetched.
+
+**10. Portfolio quality scoring (v1.1)**
+
+Evaluates portfolio composition quality — blue-chip allocation, diversity, stablecoin balance, and spam ratio — into a single A-F grade. This helps trading agents distinguish quality portfolios from meme/spam-heavy wallets.
+
+**11. ACP trust scoring (v1.1)**
+
+Purpose-built for the AGDP ecosystem. Combines wallet age, balance (as collateral signal), transaction depth, ENS ownership, DeFi participation, and portfolio quality into a 0-100 trust score. Enables agents to set trust thresholds before engaging in commerce.
+
+**12. Batch endpoint for efficiency (v1.1)**
+
+The `/profile/batch` endpoint allows profiling up to 50 wallets in a single request, with 5-way parallelism. This is essential for agents that need to evaluate multiple counterparties, scan a list of wallets, or build leaderboards.
+
+**13. Response time optimization (v1.1)**
+
+Token metadata resolution is the main bottleneck. By capping metadata calls per tier (15/30/50) and limiting concurrency to 10 parallel calls, basic tier response time dropped from ~8s to ~3s while maintaining quality for premium users.
+
 ## 4. Data Flow
 
 ### Profile Request Lifecycle
 
 ```
-1. Request arrives at POST /profile
+1. Request arrives at POST /profile (or /profile/batch)
 2. Check in-memory cache → if HIT, return immediately (~3ms)
 3. Resolve ENS if needed (cached separately, 1hr TTL)
 4. Launch parallel data fetches (tier-dependent):
@@ -128,7 +150,7 @@ Etherscan deprecated their V1 API in favor of V2, which uses a unified endpoint 
    │  b. Alchemy RPC → tx count
    │  c. Alchemy RPC → ENS reverse resolve
    │  d. Alchemy → getTokenBalances (all ERC-20s)
-   │     └─ Alchemy → getTokenMetadata × N (parallel)
+   │     └─ Alchemy → getTokenMetadata × N (parallel, capped by tier)
    │
    ├─ Standard + Premium:
    │  e. Alchemy RPC → Aave V3 getUserAccountData
@@ -138,8 +160,11 @@ Etherscan deprecated their V1 API in favor of V2, which uses a unified endpoint 
    └─ All: DeFi Llama → ETH + token prices (single call)
 5. Spam detection applied to all tokens
 6. Risk scoring computed
-7. [Premium only] Natural language summary generated
-8. Result cached and returned
+7. Wallet tags generated (all tiers)
+8. [Standard+] Portfolio quality evaluated
+9. [Standard+] ACP trust score computed
+10. [Premium only] Natural language summary generated
+11. Result cached and returned
 ```
 
 ## 5. Revenue Model
@@ -147,6 +172,7 @@ Etherscan deprecated their V1 API in favor of V2, which uses a unified endpoint 
 | Revenue Source | Mechanism |
 |---|---|
 | **Per-profile fee** | 0.0005–0.003 ETH per request via ACP escrow |
+| **Batch premium** | Full per-profile fee × address count (volume) |
 | **AGDP incentive pool** | Top 10 agents by jobs completed earn 30% of weekly pool |
 | **Agent token** | Optional: launch a Virtuals Agent Token for capital formation |
 
@@ -159,3 +185,5 @@ Etherscan deprecated their V1 API in favor of V2, which uses a unified endpoint 
 - **Redis caching** — persistent cache for multi-instance deployments
 - **Historical snapshots** — portfolio value over time
 - **Behavioral scoring** — ML-based risk assessment from transaction patterns
+- **ERC-8004 agent verification** — check if wallet is a registered on-chain agent
+- **Virtuals Agent Token detection** — identify wallets with launched agent tokens

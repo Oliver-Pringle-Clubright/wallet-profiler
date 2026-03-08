@@ -15,6 +15,9 @@ public class WalletProfile
     public RiskAssessment Risk { get; set; } = new();
     public WalletActivity? Activity { get; set; }
     public string? Summary { get; set; }
+    public List<string> Tags { get; set; } = [];
+    public PortfolioQuality? PortfolioQuality { get; set; }
+    public AcpTrustScore? AcpTrust { get; set; }
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -50,4 +53,44 @@ public class WalletActivity
     public DateTime? LastTransaction { get; set; }
     public int DaysActive { get; set; }
     public int UniqueInteractions { get; set; }
+}
+
+public class PortfolioQuality
+{
+    public decimal BluechipPct { get; set; }
+    public decimal StablecoinPct { get; set; }
+    public decimal SpamPct { get; set; }
+    public int DiversityScore { get; set; }
+    public int QualityScore { get; set; }
+    public string Grade { get; set; } = "N/A";
+}
+
+public class AcpTrustScore
+{
+    public int Score { get; set; }
+    public string Level { get; set; } = "untrusted";
+    public List<string> Factors { get; set; } = [];
+}
+
+public class BatchProfileRequest
+{
+    public List<string> Addresses { get; set; } = [];
+    public string Chain { get; set; } = "ethereum";
+    public string Tier { get; set; } = "standard";
+}
+
+public class BatchProfileResponse
+{
+    public int Total { get; set; }
+    public int Succeeded { get; set; }
+    public int Failed { get; set; }
+    public long ElapsedMs { get; set; }
+    public List<BatchProfileResult> Results { get; set; } = [];
+}
+
+public class BatchProfileResult
+{
+    public string Address { get; set; } = string.Empty;
+    public WalletProfile? Profile { get; set; }
+    public string? Error { get; set; }
 }

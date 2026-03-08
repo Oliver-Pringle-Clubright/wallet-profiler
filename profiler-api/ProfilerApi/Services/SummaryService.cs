@@ -86,6 +86,18 @@ public class SummaryService
             parts.Add($"{profile.TransactionCount} transactions across {profile.Activity.UniqueInteractions} unique addresses, active on {profile.Activity.DaysActive} distinct days.");
         }
 
+        // Tags
+        if (profile.Tags.Count > 0)
+            parts.Add($"Tags: {string.Join(", ", profile.Tags)}.");
+
+        // Portfolio quality
+        if (profile.PortfolioQuality != null && profile.PortfolioQuality.Grade != "N/A")
+            parts.Add($"Portfolio quality: grade {profile.PortfolioQuality.Grade} ({profile.PortfolioQuality.BluechipPct:F0}% blue-chip, {profile.PortfolioQuality.StablecoinPct:F0}% stablecoins).");
+
+        // ACP trust
+        if (profile.AcpTrust != null)
+            parts.Add($"ACP trust: {profile.AcpTrust.Level} ({profile.AcpTrust.Score}/100).");
+
         // Risk
         var riskPart = profile.Risk.Level switch
         {

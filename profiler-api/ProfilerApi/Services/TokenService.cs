@@ -22,7 +22,15 @@ public class TokenService
     /// Fetches all ERC-20 token balances using Alchemy's alchemy_getTokenBalances endpoint.
     /// Falls back to Etherscan V2 token transfer history if Alchemy call fails.
     /// </summary>
-    public async Task<List<TokenBalance>> GetERC20BalancesAsync(string rpcUrl, string address, string chain = "ethereum")
+    // Token metadata caps per tier to optimize response time
+    private static readonly Dictionary<string, int> MetadataCaps = new()
+    {
+        ["basic"] = 15,
+        ["standard"] = 30,
+        ["premium"] = 50
+    };
+
+    public async Task<List<TokenBalance>> GetERC20BalancesAsync(string rpcUrl, string address, string chain = "ethereum", string tier = "standard")
     {
         try
         {
@@ -32,19 +40,41 @@ public class TokenService
             if (tokenBalances.Count == 0)
                 return [];
 
-            // Step 2: Get metadata (symbol, decimals) for each token via Alchemy batch
-            var metadataTasks = tokenBalances.Select(async tb =>
+            // Step 2: Cap metadata calls based on tier for faster response
+            var metadataCap = MetadataCaps.GetValueOrDefault(tier, 30);
+            var tokensToResolve = tokenBalances.Take(metadataCap).ToList();
+            var remainingTokens = tokenBalances.Skip(metadataCap).ToList();
+
+            // Step 3: Get metadata with concurrency limit (max 10 parallel)
+            var semaphore = new SemaphoreSlim(10);
+            var metadataTasks = tokensToResolve.Select(async tb =>
             {
-                var metadata = await GetAlchemyTokenMetadataAsync(rpcUrl, tb.ContractAddress);
-                if (metadata != null)
+                await semaphore.WaitAsync();
+                try
                 {
-                    tb.Symbol = metadata.Symbol ?? "UNKNOWN";
-                    tb.Decimals = metadata.Decimals;
-                    tb.Balance = ConvertBalance(tb.RawBalanceHex, metadata.Decimals);
+                    var metadata = await GetAlchemyTokenMetadataAsync(rpcUrl, tb.ContractAddress);
+                    if (metadata != null)
+                    {
+                        tb.Symbol = metadata.Symbol ?? "UNKNOWN";
+                        tb.Decimals = metadata.Decimals;
+                        tb.Balance = ConvertBalance(tb.RawBalanceHex, metadata.Decimals);
+                    }
+                }
+                finally
+                {
+                    semaphore.Release();
                 }
             });
 
             await Task.WhenAll(metadataTasks);
+
+            // For remaining tokens beyond the cap, just convert balance with default decimals
+            foreach (var tb in remainingTokens)
+            {
+                tb.Balance = ConvertBalance(tb.RawBalanceHex, 18);
+            }
+
+            tokenBalances = tokensToResolve.Concat(remainingTokens).ToList();
 
             // Step 3: Detect spam tokens
             foreach (var token in tokenBalances)

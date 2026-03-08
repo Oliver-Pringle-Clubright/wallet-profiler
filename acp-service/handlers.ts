@@ -42,6 +42,24 @@ export async function validateRequirements(requirements: Record<string, unknown>
 export async function executeJob(job: Job): Promise<unknown> {
   const { address, chain = "ethereum", tier = "standard" } = job.requirements;
 
+  // Support batch: if address contains commas, use batch endpoint
+  const addresses = address.split(",").map((a: string) => a.trim()).filter(Boolean);
+
+  if (addresses.length > 1) {
+    const response = await fetch(`${PROFILER_API_URL}/profile/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ addresses, chain, tier }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Profiler API error (${response.status}): ${error}`);
+    }
+
+    return response.json();
+  }
+
   const response = await fetch(`${PROFILER_API_URL}/profile`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

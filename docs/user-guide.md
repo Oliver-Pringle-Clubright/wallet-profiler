@@ -1,8 +1,8 @@
-# Wallet Profiler — User Guide
+# Wallet Profiler v1.1 — User Guide
 
 ## Overview
 
-The Wallet Profiler is an AGDP (Agent GDP) service agent that provides comprehensive on-chain wallet analysis for Ethereum-compatible blockchains. Given a wallet address or ENS name, it returns a detailed profile including token holdings with live USD valuations, DeFi positions, transaction history, risk assessment, and spam detection.
+The Wallet Profiler is an AGDP (Agent GDP) service agent that provides comprehensive on-chain wallet analysis for Ethereum-compatible blockchains. Given a wallet address or ENS name, it returns a detailed profile including token holdings with live USD valuations, DeFi positions, transaction history, risk assessment, spam detection, wallet tags, portfolio quality grading, and ACP trust scoring.
 
 The service offers three pricing tiers (basic, standard, premium) and runs on the Agent Commerce Protocol (ACP) marketplace.
 
@@ -19,14 +19,17 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 | Feature | Basic (0.0005 ETH) | Standard (0.001 ETH) | Premium (0.003 ETH) |
 |---|---|---|---|
 | ETH balance | Yes | Yes | Yes |
-| ERC-20 tokens with balances | Yes | Yes | Yes |
+| ERC-20 tokens with balances | Up to 15 | Up to 30 | Up to 50 |
 | ENS resolution | Yes | Yes | Yes |
 | Risk score | Yes | Yes | Yes |
 | Spam token detection | Yes | Yes | Yes |
+| Wallet tags | Yes | Yes | Yes |
 | USD prices for tokens | — | Yes | Yes |
 | Total portfolio value | — | Yes | Yes |
 | DeFi positions (Aave, Compound) | — | Yes | Yes |
 | Transaction activity history | — | Yes | Yes |
+| Portfolio quality score | — | Yes | Yes |
+| ACP trust score | — | Yes | Yes |
 | Natural language summary | — | — | Yes |
 
 ## Getting Started
@@ -46,7 +49,7 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
    cd wallet-profiler
    ```
 
-2. Configure API keys in `profiler-api/ProfilerApi/appsettings.json`:
+2. Configure API keys in `profiler-api/ProfilerApi/appsettings.Development.json`:
    ```json
    {
      "Alchemy": { "ApiKey": "your_alchemy_key" },
@@ -54,15 +57,17 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
    }
    ```
 
+   > **Note:** Never commit real API keys. Use `appsettings.Development.json` (gitignored) for local development. The checked-in `appsettings.json` contains only placeholder values.
+
 3. Build and run the C# API:
    ```bash
    cd profiler-api/ProfilerApi
-   dotnet run
+   ASPNETCORE_ENVIRONMENT=Development dotnet run
    ```
 
 4. The API is now available at `http://localhost:5000`.
 
-### Making a Request
+### Single Profile Request
 
 **Endpoint:** `POST /profile`
 
@@ -84,6 +89,40 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 ```
 
 Both `chain` (defaults to `"ethereum"`) and `tier` (defaults to `"standard"`) are optional.
+
+### Batch Profile Request
+
+**Endpoint:** `POST /profile/batch`
+
+Profile up to 50 wallets in a single request. Addresses are processed in parallel (5 concurrent).
+
+**Request body:**
+```json
+{
+  "addresses": [
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B",
+    "vitalik.eth"
+  ],
+  "chain": "ethereum",
+  "tier": "standard"
+}
+```
+
+**Response:**
+```json
+{
+  "total": 3,
+  "succeeded": 3,
+  "failed": 0,
+  "elapsedMs": 1321,
+  "results": [
+    { "address": "0xd8d...045", "profile": { ... }, "error": null },
+    { "address": "0xAb5...9B", "profile": { ... }, "error": null },
+    { "address": "vitalik.eth", "profile": { ... }, "error": null }
+  ]
+}
+```
 
 ### View Available Tiers
 
@@ -126,8 +165,29 @@ curl http://localhost:5000/tiers
     "daysActive": 200,
     "uniqueInteractions": 217
   },
-  "summary": "This is a mid-range wallet (active since 2015 (10+ years)), holding $62.7K total. Portfolio breakdown: $62.5K in ETH, $179.31 in CULT. 1647 transactions across 217 unique addresses, active on 200 distinct days. Low risk — well-established wallet with no significant concerns.",
-  "profiledAt": "2026-03-08T14:57:03Z"
+  "tags": ["mid-tier", "ens-holder", "veteran", "og", "dormant", "power-user", "well-connected", "diversified"],
+  "portfolioQuality": {
+    "bluechipPct": 99.5,
+    "stablecoinPct": 0,
+    "spamPct": 0,
+    "diversityScore": 15,
+    "qualityScore": 72,
+    "grade": "B"
+  },
+  "acpTrust": {
+    "score": 90,
+    "level": "high",
+    "factors": [
+      "Wallet age 3+ years (+25)",
+      "Significant ETH balance >$10K (+20)",
+      "Deep transaction history 500+ txs (+15)",
+      "ENS name registered (+10)",
+      "High portfolio quality (+10)",
+      "Highly connected wallet 50+ interactions (+10)"
+    ]
+  },
+  "summary": "This is a mid-range wallet (active since 2015 (10+ years)), holding $62.7K total. ...",
+  "profiledAt": "2026-03-08T15:33:31Z"
 }
 ```
 
@@ -143,12 +203,66 @@ curl http://localhost:5000/tiers
 | `ethValueUsd` | decimal? | Std+ | ETH holdings value in USD |
 | `totalValueUsd` | decimal? | Std+ | Total portfolio value (ETH + priced tokens) |
 | `transactionCount` | int | All | Total outbound transaction count |
-| `topTokens` | array | All | ERC-20 tokens (up to 50) |
+| `topTokens` | array | All | ERC-20 tokens (up to 15/30/50 by tier) |
 | `topTokens[].isSpam` | bool | All | Whether the token is flagged as spam |
 | `deFiPositions` | array | Std+ | Active DeFi positions |
 | `risk` | object | All | Risk assessment with score and flags |
 | `activity` | object? | Std+ | Transaction history summary |
+| `tags` | string[] | All | Classification tags (whale, defi-user, veteran, etc.) |
+| `portfolioQuality` | object? | Std+ | Portfolio quality grade and metrics |
+| `acpTrust` | object? | Std+ | ACP trust score for agent-to-agent commerce |
 | `summary` | string? | Premium | Natural language wallet summary |
+
+### Wallet Tags
+
+Wallets are automatically classified with tags based on their on-chain activity:
+
+| Tag | Criteria |
+|---|---|
+| `whale` | Portfolio > $1M |
+| `high-roller` | Portfolio > $100K |
+| `mid-tier` | Portfolio > $10K |
+| `ens-holder` | Has an ENS name |
+| `defi-user` | Active DeFi positions |
+| `multi-protocol` | Uses 2+ DeFi protocols |
+| `veteran` | Wallet age > 1 year |
+| `og` | Wallet age > 5 years |
+| `fresh-wallet` | Wallet age < 30 days |
+| `dormant` | Inactive > 6 months |
+| `power-user` | 1000+ txs, 100+ active days |
+| `active-trader` | 100+ transactions |
+| `well-connected` | 50+ unique interactions |
+| `diversified` | 20+ non-spam tokens |
+| `concentrated` | 3 or fewer tokens |
+| `stablecoin-heavy` | >50% value in stablecoins |
+| `hodler` | Old wallet, infrequent transactions |
+| `spam-magnet` | 10+ spam tokens received |
+
+### Portfolio Quality Score
+
+Available on standard and premium tiers. Evaluates portfolio composition:
+
+| Field | Description |
+|---|---|
+| `bluechipPct` | Percentage of value in ETH + blue-chip tokens (WBTC, LINK, UNI, AAVE, etc.) |
+| `stablecoinPct` | Percentage of value in stablecoins (USDC, USDT, DAI, etc.) |
+| `spamPct` | Percentage of tokens flagged as spam |
+| `diversityScore` | Token diversity (0-100) |
+| `qualityScore` | Composite quality score (0-100) |
+| `grade` | Letter grade: A (80+), B (60+), C (40+), D (20+), F (<20) |
+
+### ACP Trust Score
+
+Available on standard and premium tiers. Evaluates counterparty trustworthiness for agent-to-agent commerce:
+
+| Score Range | Level | Meaning |
+|---|---|---|
+| 80–100 | High | Highly trustworthy — established, well-funded wallet |
+| 60–79 | Moderate | Generally trustworthy — some history and assets |
+| 30–59 | Low | Exercise caution — limited history or assets |
+| 0–29 | Untrusted | Insufficient trust signals — new or empty wallet |
+
+Trust factors include: wallet age, ETH balance, transaction depth, ENS ownership, DeFi participation, portfolio quality, and interaction diversity.
 
 ### Risk Score Interpretation
 
@@ -208,3 +322,6 @@ See [DEPLOY.md](../DEPLOY.md) for full deployment instructions.
 
 **DeFi positions empty:**
 - Only Aave V3 and Compound V3 are checked
+
+**Portfolio quality / ACP trust is null:**
+- These are only included with `standard` and `premium` tiers
