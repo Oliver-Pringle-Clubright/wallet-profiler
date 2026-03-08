@@ -1,4 +1,4 @@
-# Wallet Profiler v1.7 — User Guide
+# Wallet Profiler v1.8 — User Guide
 
 ## Overview
 
@@ -574,6 +574,54 @@ Returns available enterprise subscription plans for high-volume API access.
 | Starter | 0.5 ETH | 1,000 | Email |
 | Growth | 2 ETH | 5,000 | Priority |
 | Enterprise | 10 ETH | 50,000 | Dedicated |
+
+### Social Identity (v1.8)
+
+**Endpoint:** `GET /identity/{address}`
+
+Analyzes social identity signals for a wallet.
+
+```bash
+curl http://localhost:5000/identity/vitalik.eth
+```
+
+| Field | Description |
+|---|---|
+| `identityScore` | Social identity score (0-100) |
+| `identityLevel` | `anonymous`, `pseudonymous`, or `identified` |
+| `socialSignals` | List of identity signals found |
+| `ensTextRecords` | ENS text records (name, avatar, social links) |
+| `daoMemberships` | Number of governance protocols participated in |
+
+### Wallet Comparison (v1.8)
+
+**Endpoint:** `POST /compare`
+
+Compare 2-10 wallets side-by-side with insights.
+
+```json
+{
+  "addresses": [
+    "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"
+  ],
+  "chain": "ethereum",
+  "tier": "standard"
+}
+```
+
+Returns: per-wallet stats, leader identification, common tokens, and unique insights about the group.
+
+### Agent Referral Program (v1.8)
+
+**Register:** `POST /referral/register`
+```json
+{ "agentAddress": "0xYourAgentAddress" }
+```
+Returns a unique referral code. Share it with other agents — earn 10% commission on their profile fees.
+
+**Check stats:** `GET /referral/{address}`
+Returns total referrals, total earnings, and recent referral records.
 
 ### Risk Score Interpretation
 

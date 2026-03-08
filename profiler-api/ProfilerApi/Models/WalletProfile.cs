@@ -369,6 +369,76 @@ public class MonitorPlan
     public bool IncludesBalanceAlerts { get; set; }
 }
 
+// --- v1.8: Wallet Comparison ---
+
+public class WalletComparisonRequest
+{
+    public List<string> Addresses { get; set; } = [];
+    public string Chain { get; set; } = "ethereum";
+    public string Tier { get; set; } = "standard";
+}
+
+public class WalletComparison
+{
+    public List<WalletComparisonEntry> Wallets { get; set; } = [];
+    public string? LeaderAddress { get; set; }
+    public List<string> CommonTokens { get; set; } = [];
+    public List<string> UniqueInsights { get; set; } = [];
+    public DateTime ComparedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class WalletComparisonEntry
+{
+    public string Address { get; set; } = string.Empty;
+    public string? EnsName { get; set; }
+    public decimal EthBalance { get; set; }
+    public decimal? TotalValueUsd { get; set; }
+    public int TransactionCount { get; set; }
+    public int TokenCount { get; set; }
+    public string? RiskLevel { get; set; }
+    public int TrustScore { get; set; }
+    public string? SmartMoneyClass { get; set; }
+    public List<string> Tags { get; set; } = [];
+}
+
+// --- v1.8: Social Identity ---
+
+public class SocialIdentity
+{
+    public string Address { get; set; } = string.Empty;
+    public string? EnsName { get; set; }
+    public string? EnsAvatar { get; set; }
+    public List<string> EnsTextRecords { get; set; } = [];
+    public int? DaoMemberships { get; set; }
+    public int? GovernanceVotes { get; set; }
+    public List<string> SocialSignals { get; set; } = [];
+    public int IdentityScore { get; set; }
+    public string IdentityLevel { get; set; } = "anonymous"; // anonymous, pseudonymous, identified
+}
+
+// --- v1.8: Agent Referral ---
+
+public class ReferralStats
+{
+    public int TotalReferrals { get; set; }
+    public decimal TotalEarningsEth { get; set; }
+    public decimal CommissionRate { get; set; } = 0.10m; // 10%
+    public List<ReferralRecord> RecentReferrals { get; set; } = [];
+}
+
+public class ReferralRecord
+{
+    public string ReferralCode { get; set; } = string.Empty;
+    public string ReferredAgent { get; set; } = string.Empty;
+    public decimal EarningsEth { get; set; }
+    public DateTime ReferredAt { get; set; }
+}
+
+public class ReferralRequest
+{
+    public string AgentAddress { get; set; } = string.Empty;
+}
+
 // --- v1.7: MEV Detection ---
 
 public class MevExposure

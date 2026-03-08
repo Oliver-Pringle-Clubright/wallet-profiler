@@ -1,4 +1,4 @@
-# Wallet Profiler v1.7 — Design Document
+# Wallet Profiler v1.8 — Design Document
 
 ## 1. Problem Statement
 
@@ -298,3 +298,17 @@ Analyzes a wallet's transaction history for MEV exposure — sandwich attacks, f
 ### Bulk Enterprise Pricing
 
 `GET /pricing/enterprise` returns three enterprise plans: starter (0.5 ETH/month, 1K profiles), growth (2 ETH/month, 5K profiles), and enterprise (10 ETH/month, 50K profiles). Each plan includes different rate limits, support levels, and features. Creates a high-value recurring revenue channel.
+
+## 13. v1.8 New Features
+
+### Social Identity Correlation
+
+`GET /identity/{address}` analyzes a wallet's social identity signals by combining ENS ownership, ENS text records, governance participation, DAO membership, wallet maturity, interaction diversity, NFT ownership, and activity tags. Returns an identity score (0-100) and classification: `anonymous`, `pseudonymous`, or `identified`. Helps agents assess the social credibility of counterparties.
+
+### Agent Referral Program
+
+Two endpoints for a referral system: `POST /referral/register` generates a unique referral code for an agent, and `GET /referral/{address}` returns referral statistics. Agents earn 10% commission on profile fees from referred agents. Creates a network effect — agents are incentivized to promote the service, driving organic growth.
+
+### Wallet Comparison
+
+`POST /compare` takes 2-10 wallet addresses and builds profiles for each, then generates a side-by-side comparison with: value rankings, common tokens, risk comparison, DeFi participation comparison, smart money classification, trust score averages, and unique insights. Essential for agents doing competitive analysis, portfolio benchmarking, or counterparty evaluation.

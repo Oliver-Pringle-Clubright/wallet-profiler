@@ -1,4 +1,4 @@
-# Wallet Profiler v1.7 — Technical Specifications
+# Wallet Profiler v1.8 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -59,7 +59,10 @@ wallet-profiler/
 │           ├── TokenHolderService.cs     # Token holder analysis (v1.6)
 │           ├── SnapshotService.cs        # Portfolio snapshot history (v1.6)
 │           ├── MevDetectionService.cs   # MEV exposure analysis (v1.7)
-│           └── ReputationBadgeService.cs # On-chain reputation badge (v1.7)
+│           ├── ReputationBadgeService.cs # On-chain reputation badge (v1.7)
+│           ├── SocialIdentityService.cs # Social identity correlation (v1.8)
+│           ├── ReferralService.cs       # Agent referral program (v1.8)
+│           └── WalletComparisonService.cs # Wallet comparison (v1.8)
 ├── acp-service/                          # TypeScript ACP proxy
 │   ├── Dockerfile
 │   ├── package.json
@@ -155,6 +158,40 @@ Returns all active monitor subscriptions.
 ### DELETE /monitor/{id} (v1.3)
 
 Removes a monitor subscription by ID.
+
+### POST /compare (v1.8)
+
+Compares 2-10 wallets side-by-side.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `addresses` | string[] | Yes | — | 2-10 wallet addresses to compare |
+| `chain` | string | No | `"ethereum"` | Chain to query |
+| `tier` | string | No | `"standard"` | Analysis tier |
+
+**Response:** `200 OK` — `WalletComparison` JSON
+
+### GET /identity/{address} (v1.8)
+
+Analyzes social identity signals for a wallet.
+
+**Response:** `200 OK` — `SocialIdentity` JSON
+
+### POST /referral/register (v1.8)
+
+Registers an agent in the referral program.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `agentAddress` | string | Yes | Agent's wallet address |
+
+**Response:** `200 OK` — `{ referralCode, commissionRate }`
+
+### GET /referral/{address} (v1.8)
+
+Returns referral statistics for an agent.
+
+**Response:** `200 OK` — `ReferralStats` JSON
 
 ### GET /reputation/{address} (v1.7)
 
@@ -565,6 +602,53 @@ interface EnterprisePricingPlan {
   overageFeeEth: number;
   supportLevel: string;
   features: string[];
+}
+
+interface WalletComparison {
+  wallets: WalletComparisonEntry[];
+  leaderAddress: string | null;
+  commonTokens: string[];
+  uniqueInsights: string[];
+  comparedAt: string;
+}
+
+interface WalletComparisonEntry {
+  address: string;
+  ensName: string | null;
+  ethBalance: number;
+  totalValueUsd: number | null;
+  transactionCount: number;
+  tokenCount: number;
+  riskLevel: string | null;
+  trustScore: number;
+  smartMoneyClass: string | null;
+  tags: string[];
+}
+
+interface SocialIdentity {
+  address: string;
+  ensName: string | null;
+  ensAvatar: string | null;
+  ensTextRecords: string[];
+  daoMemberships: number | null;
+  governanceVotes: number | null;
+  socialSignals: string[];
+  identityScore: number;            // 0-100
+  identityLevel: string;            // "anonymous" | "pseudonymous" | "identified"
+}
+
+interface ReferralStats {
+  totalReferrals: number;
+  totalEarningsEth: number;
+  commissionRate: number;
+  recentReferrals: ReferralRecord[];
+}
+
+interface ReferralRecord {
+  referralCode: string;
+  referredAgent: string;
+  earningsEth: number;
+  referredAt: string;
 }
 ```
 
@@ -1032,3 +1116,46 @@ Generates ERC-721 compatible soulbound NFT metadata from a wallet profile.
 - Default → active_user
 
 **Badge metadata:** Follows OpenSea metadata standard with `name`, `description`, `image`, and `attributes` array. Encoded as a `data:application/json;base64,...` URI for on-chain storage.
+
+### 5.28 SocialIdentityService (v1.8)
+
+Correlates on-chain data with social identity signals to build a social credibility profile.
+
+**Identity signals scored:**
+
+| Signal | Max Points | Source |
+|---|---|---|
+| ENS name ownership | 20 | ENS reverse resolution |
+| ENS text records | 5 each | ENS resolver text records |
+| Governance participation | 10 per DAO | Top interaction labels |
+| 5+ year wallet history | 15 | Activity data |
+| 1+ year wallet history | 10 | Activity data |
+| 50+ unique interactions | 10 | Activity data |
+| NFT collector | 5 | NFT holdings |
+| Power user tag | 5 | Wallet tags |
+| DeFi participant tag | 5 | Wallet tags |
+
+**Identity levels:** anonymous (0-19), pseudonymous (20-49), identified (50+).
+
+### 5.29 ReferralService (v1.8)
+
+In-memory agent referral program using `ConcurrentDictionary`.
+
+**Mechanics:**
+- `Register(agentAddress)` generates a deterministic referral code from the address
+- `RecordReferral(code, referredAgent, feePaid)` records a 10% commission
+- `GetStats(address)` returns total referrals, earnings, and last 10 records
+- Caps stored records at 100 per agent
+
+**Revenue model:** 10% of each profile fee (0.0001 ETH from standard tier) credited to the referring agent.
+
+### 5.30 WalletComparisonService (v1.8)
+
+Compares multiple wallet profiles side-by-side with automated insights.
+
+**Comparison features:**
+1. Per-wallet summary entry with key metrics
+2. Leader identification (highest value or trust)
+3. Common token detection via set intersection
+4. Automated insights: value spread, risk comparison, DeFi participation, smart money classification, trust score average
+5. Up to 10 wallets per comparison

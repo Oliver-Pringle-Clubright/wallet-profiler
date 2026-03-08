@@ -34,6 +34,9 @@ builder.Services.AddSingleton<SanctionsService>();
 builder.Services.AddSingleton<SmartMoneyService>();
 builder.Services.AddSingleton<SnapshotService>();
 builder.Services.AddSingleton<ReputationBadgeService>();
+builder.Services.AddSingleton<SocialIdentityService>();
+builder.Services.AddSingleton<ReferralService>();
+builder.Services.AddSingleton<WalletComparisonService>();
 builder.Services.AddScoped<ProfileOrchestrator>();
 builder.Services.AddSingleton<MonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorService>());
@@ -494,6 +497,111 @@ app.MapGet("/chains", () =>
         nativeToken = ChainConfig.GetNativeSymbol(c.Key)
     });
     return Results.Ok(chains);
+});
+
+// --- POST /compare (v1.8) ---
+app.MapPost("/compare", async (
+    WalletComparisonRequest request,
+    ProfileOrchestrator orchestrator,
+    WalletComparisonService comparisonService,
+    SlaTrackingService sla,
+    ILogger<Program> logger) =>
+{
+    if (request.Addresses.Count < 2)
+        return Results.BadRequest(new { error = "At least 2 addresses required" });
+
+    if (request.Addresses.Count > 10)
+        return Results.BadRequest(new { error = "Maximum 10 addresses per comparison" });
+
+    using var tracker = sla.Track("compare");
+    try
+    {
+        var chain = request.Chain.ToLowerInvariant();
+        var tier = request.Tier.ToLowerInvariant();
+
+        var profiles = new List<WalletProfile>();
+        var semaphore = new SemaphoreSlim(5);
+        var tasks = request.Addresses.Select(async rawAddress =>
+        {
+            await semaphore.WaitAsync();
+            try
+            {
+                var address = rawAddress.Trim();
+                if (address.EndsWith(".eth"))
+                    address = await orchestrator.ResolveAddressAsync(address, chain);
+                return await orchestrator.BuildProfileAsync(address, chain, tier);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Comparison failed for {Address}", rawAddress);
+                return null;
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        var results = await Task.WhenAll(tasks);
+        profiles = results.Where(p => p != null).Cast<WalletProfile>().ToList();
+
+        if (profiles.Count < 2)
+            return Results.BadRequest(new { error = "Need at least 2 valid profiles to compare" });
+
+        var comparison = comparisonService.Compare(profiles);
+        return Results.Ok(comparison);
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// --- GET /identity/{address} (v1.8) ---
+app.MapGet("/identity/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    SocialIdentityService identityService,
+    SlaTrackingService sla) =>
+{
+    using var tracker = sla.Track("identity");
+    try
+    {
+        var resolved = address.Trim();
+        if (resolved.EndsWith(".eth"))
+            resolved = await orchestrator.ResolveAddressAsync(resolved, "ethereum");
+
+        var profile = await orchestrator.BuildProfileAsync(resolved, "ethereum", "standard");
+        var identity = await identityService.AnalyzeAsync(resolved, profile);
+        return Results.Ok(identity);
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// --- POST /referral/register (v1.8) ---
+app.MapPost("/referral/register", (
+    ReferralRequest request,
+    ReferralService referralService) =>
+{
+    if (string.IsNullOrEmpty(request.AgentAddress))
+        return Results.BadRequest(new { error = "AgentAddress is required" });
+
+    var code = referralService.Register(request.AgentAddress);
+    return Results.Ok(new { referralCode = code, commissionRate = "10%" });
+});
+
+// --- GET /referral/{address} (v1.8) ---
+app.MapGet("/referral/{address}", (
+    string address,
+    ReferralService referralService) =>
+{
+    var stats = referralService.GetStats(address);
+    return Results.Ok(stats);
 });
 
 // --- GET /sla (v1.5) ---
