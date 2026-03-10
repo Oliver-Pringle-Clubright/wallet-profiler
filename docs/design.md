@@ -1,4 +1,4 @@
-# Wallet Profiler v2.4 — Design Document
+# Wallet Profiler v2.5 — Design Document
 
 ## 1. Problem Statement
 
@@ -370,3 +370,18 @@ Updated all 6 ACP offering descriptions with:
 - **Response time claims**: walletstatus (~200ms), quickcheck (~500ms), whalealerts (~3s), walletprofiler (~5s), tokenholders (~8s), deepanalysis (~15s)
 - **Searchable keywords**: "due diligence", "counterparty risk", "AML compliance", "fraud detection", "smart money tracking", "market intelligence"
 - **Chain enumeration**: all descriptions explicitly list supported chains for discovery
+
+## 18. v2.5 — Revenue Priority: Enhanced deepanalysis
+
+Deepanalysis is the highest-margin offering ($0.10/job). Enhanced with automatic wallet comparison when multiple addresses are provided — the batch response now includes a `comparison` object with common tokens, leader identification, and unique insights alongside individual profiles. This makes deepanalysis the go-to offering for comprehensive multi-wallet intelligence.
+
+### ACP Offering Lineup (v2.5)
+
+| Offering | Fee | Response | Use Case |
+|---|---|---|---|
+| walletstatus | $0.01 | ~200ms | Pre-filtering, address validation |
+| quickcheck | $0.01 | ~500ms | Trust scoring, counterparty check |
+| whalealerts | $0.02 | ~3s | Exchange flow, whale tracking |
+| walletprofiler | $0.03 | ~5s | Full profiling, batch analysis |
+| tokenholders | $0.05 | ~8s | Token concentration, rug pull risk |
+| deepanalysis | $0.10 | ~15s | Cross-chain, comparison, AI summary |
