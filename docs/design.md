@@ -1,4 +1,4 @@
-# Wallet Profiler v2.3 — Design Document
+# Wallet Profiler v2.4 — Design Document
 
 ## 1. Problem Statement
 
@@ -363,3 +363,10 @@ Added ultra-fast `walletstatus` offering as the cheapest entry point ($0.01). `G
 ## 16. v2.3 — Cross-Chain Deep Analysis & NFT Differentiation
 
 Upgraded `deepanalysis` offering to use cross-chain aggregation by default. When chain is omitted or set to "all", the handler calls `/profile/multi-chain` to profile the wallet across all 7 EVM chains in a single request. This provides a complete cross-chain portfolio view including total value across chains, active chain detection, and per-chain breakdowns — all at premium tier with AI summary. Updated walletprofiler offering description to emphasize NFT portfolio with floor prices and DeFi positions as key differentiators.
+
+## 17. v2.4 — Response Time & Search Optimization
+
+Updated all 6 ACP offering descriptions with:
+- **Response time claims**: walletstatus (~200ms), quickcheck (~500ms), whalealerts (~3s), walletprofiler (~5s), tokenholders (~8s), deepanalysis (~15s)
+- **Searchable keywords**: "due diligence", "counterparty risk", "AML compliance", "fraud detection", "smart money tracking", "market intelligence"
+- **Chain enumeration**: all descriptions explicitly list supported chains for discovery
