@@ -61,11 +61,23 @@ public class ChainConfig
     /// <summary>
     /// Native token symbol per chain (v1.7).
     /// </summary>
+    /// <summary>
+    /// Whether a chain is Solana (non-EVM) — requires separate RPC handling.
+    /// </summary>
+    public static bool IsSolana(string chain) => chain == "solana";
+
+    /// <summary>
+    /// All supported chain names including Solana.
+    /// </summary>
+    public static readonly string[] AllChains =
+        ["ethereum", "base", "arbitrum", "polygon", "optimism", "avalanche", "bnb", "solana"];
+
     public static string GetNativeSymbol(string chain) => chain switch
     {
         "polygon" => "MATIC",
         "avalanche" => "AVAX",
         "bnb" => "BNB",
+        "solana" => "SOL",
         _ => "ETH"
     };
 
@@ -77,6 +89,7 @@ public class ChainConfig
         "polygon" => "coingecko:matic-network",
         "avalanche" => "coingecko:avalanche-2",
         "bnb" => "coingecko:binancecoin",
+        "solana" => "coingecko:solana",
         _ => "coingecko:ethereum"
     };
 }

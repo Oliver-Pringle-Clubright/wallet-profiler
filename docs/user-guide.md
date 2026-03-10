@@ -1,4 +1,4 @@
-# Wallet Profiler v2.5 — User Guide
+# Wallet Profiler v2.6 — User Guide
 
 ## Overview
 
@@ -17,6 +17,7 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 | Optimism | 10 | ETH | Supported (v1.7) |
 | Avalanche | 43114 | AVAX | Supported (v1.7) |
 | BNB Chain | 56 | BNB | Supported (v1.7) |
+| Solana | — | SOL | Supported (v2.6) — walletstatus & quickcheck |
 
 ## Service Tiers
 

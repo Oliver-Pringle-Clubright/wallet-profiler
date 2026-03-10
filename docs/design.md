@@ -1,4 +1,4 @@
-# Wallet Profiler v2.5 — Design Document
+# Wallet Profiler v2.6 — Design Document
 
 ## 1. Problem Statement
 
@@ -385,3 +385,7 @@ Deepanalysis is the highest-margin offering ($0.10/job). Enhanced with automatic
 | walletprofiler | $0.03 | ~5s | Full profiling, batch analysis |
 | tokenholders | $0.05 | ~8s | Token concentration, rug pull risk |
 | deepanalysis | $0.10 | ~15s | Cross-chain, comparison, AI summary |
+
+## 19. v2.6 — Solana Support
+
+Added Solana as the 8th supported chain. Solana uses a separate `SolanaService` with JSON-RPC calls (`getBalance`, `getSignaturesForAddress`, `getTokenAccountsByOwner`, `getAccountInfo`) since it's non-EVM. Supported on `walletstatus` and `quickcheck` offerings — returns SOL balance, transaction count, SPL token count, and trust scoring. Uses Alchemy Solana RPC when configured, falls back to public `api.mainnet-beta.solana.com`. Solana addresses are base58-encoded (32-44 chars), automatically detected by validators.

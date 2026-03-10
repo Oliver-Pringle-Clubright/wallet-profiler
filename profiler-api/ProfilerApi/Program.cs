@@ -48,6 +48,7 @@ builder.Services.AddHttpClient<TransferHistoryService>();
 builder.Services.AddHttpClient<TokenHolderService>();
 builder.Services.AddHttpClient<MevDetectionService>();
 builder.Services.AddHttpClient<WhaleAlertService>();
+builder.Services.AddHttpClient<SolanaService>();
 
 var app = builder.Build();
 
@@ -265,17 +266,66 @@ app.MapPost("/profile/multi-chain", async (
     }
 });
 
-// --- GET /trust/{address} ---
+// --- GET /trust/{address} (Solana v2.6) ---
 app.MapGet("/trust/{address}", async (
     string address,
     EthereumService ethService,
     TokenService tokenService,
+    SolanaService solanaService,
     SlaTrackingService sla,
+    HttpContext httpContext,
     ILogger<Program> logger) =>
 {
     using var tracker = sla.Track("trust");
     address = address.Trim();
-    var chain = "ethereum";
+    var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
+
+    // Solana trust check
+    if (ChainConfig.IsSolana(chain))
+    {
+        if (!SolanaService.IsValidSolanaAddress(address))
+            return Results.BadRequest(new { error = "Invalid Solana address format" });
+
+        var solBalance = await solanaService.GetSolBalanceAsync(address);
+        var solTxCount = await solanaService.GetTransactionCountAsync(address);
+        var solTokenCount = await solanaService.GetTokenAccountCountAsync(address);
+
+        var solScore = 0;
+        var solFactors = new List<string>();
+
+        if (solTxCount > 1000) { solScore += 35; solFactors.Add($"Deep history {solTxCount} txs (+35)"); }
+        else if (solTxCount > 500) { solScore += 30; solFactors.Add($"Strong history {solTxCount} txs (+30)"); }
+        else if (solTxCount > 100) { solScore += 25; solFactors.Add($"Good history {solTxCount} txs (+25)"); }
+        else if (solTxCount > 50) { solScore += 20; solFactors.Add($"Moderate history {solTxCount} txs (+20)"); }
+        else if (solTxCount > 20) { solScore += 15; solFactors.Add($"Some history {solTxCount} txs (+15)"); }
+        else if (solTxCount > 5) { solScore += 10; solFactors.Add($"Light history {solTxCount} txs (+10)"); }
+        else if (solTxCount > 0) { solScore += 5; solFactors.Add($"Minimal history {solTxCount} txs (+5)"); }
+
+        if (solBalance > 100) { solScore += 25; solFactors.Add($"Large SOL balance {solBalance:F2} (+25)"); }
+        else if (solBalance > 10) { solScore += 20; solFactors.Add($"Good SOL balance {solBalance:F2} (+20)"); }
+        else if (solBalance > 1) { solScore += 15; solFactors.Add($"Some SOL balance {solBalance:F2} (+15)"); }
+        else if (solBalance > 0.1m) { solScore += 10; solFactors.Add($"Small SOL balance (+10)"); }
+        else if (solBalance > 0) { solScore += 5; solFactors.Add("Minimal SOL balance (+5)"); }
+
+        if (solTokenCount > 20) { solScore += 20; solFactors.Add($"Diverse portfolio {solTokenCount} tokens (+20)"); }
+        else if (solTokenCount > 5) { solScore += 10; solFactors.Add($"Some tokens {solTokenCount} (+10)"); }
+        else if (solTokenCount > 0) { solScore += 5; solFactors.Add($"Few tokens {solTokenCount} (+5)"); }
+
+        solScore = Math.Clamp(solScore, 0, 100);
+
+        return Results.Ok(new TrustCheckResponse
+        {
+            Address = address,
+            EthBalance = solBalance,
+            TransactionCount = solTxCount,
+            TokenCount = solTokenCount,
+            TrustScore = solScore,
+            TrustLevel = solScore >= 80 ? "high" : solScore >= 60 ? "moderate" : solScore >= 30 ? "low" : "untrusted",
+            Factors = solFactors
+        });
+    }
+
+    // EVM trust check
     var web3 = ethService.GetWeb3(chain);
     var rpcUrl = ethService.GetRpcUrl(chain);
 
@@ -605,10 +655,11 @@ app.MapGet("/referral/{address}", (
     return Results.Ok(stats);
 });
 
-// --- GET /status/{address} (v2.2) ---
+// --- GET /status/{address} (v2.2, Solana v2.6) ---
 app.MapGet("/status/{address}", async (
     string address,
     EthereumService ethService,
+    SolanaService solanaService,
     SlaTrackingService sla,
     HttpContext httpContext) =>
 {
@@ -618,6 +669,29 @@ app.MapGet("/status/{address}", async (
 
     try
     {
+        // Solana: separate RPC path
+        if (ChainConfig.IsSolana(chain))
+        {
+            if (!SolanaService.IsValidSolanaAddress(address))
+                return Results.BadRequest(new { error = "Invalid Solana address format" });
+
+            var balanceTask = solanaService.GetSolBalanceAsync(address);
+            var txCountTask = solanaService.GetTransactionCountAsync(address);
+            var isContractTask = solanaService.IsContractAsync(address);
+
+            await Task.WhenAll(balanceTask, txCountTask, isContractTask);
+
+            return Results.Ok(new WalletStatusResponse
+            {
+                Address = address,
+                Chain = "solana",
+                EthBalance = balanceTask.Result,
+                TransactionCount = txCountTask.Result,
+                IsContract = isContractTask.Result
+            });
+        }
+
+        // EVM chains
         var web3 = ethService.GetWeb3(chain);
 
         if (address.EndsWith(".eth"))
@@ -626,22 +700,22 @@ app.MapGet("/status/{address}", async (
             catch { return Results.BadRequest(new { error = "Could not resolve ENS name" }); }
         }
 
-        var balanceTask = ethService.GetEthBalanceAsync(web3, address);
-        var txCountTask = ethService.GetTransactionCountAsync(web3, address);
+        var evmBalanceTask = ethService.GetEthBalanceAsync(web3, address);
+        var evmTxCountTask = ethService.GetTransactionCountAsync(web3, address);
         var codeTask = web3.Eth.GetCode.SendRequestAsync(address);
 
-        await Task.WhenAll(balanceTask, txCountTask, codeTask);
+        await Task.WhenAll(evmBalanceTask, evmTxCountTask, codeTask);
 
         var code = codeTask.Result;
-        var isContract = !string.IsNullOrEmpty(code) && code != "0x" && code != "0x0";
+        var isEvmContract = !string.IsNullOrEmpty(code) && code != "0x" && code != "0x0";
 
         return Results.Ok(new WalletStatusResponse
         {
             Address = address,
             Chain = chain,
-            EthBalance = balanceTask.Result,
-            TransactionCount = txCountTask.Result,
-            IsContract = isContract
+            EthBalance = evmBalanceTask.Result,
+            TransactionCount = evmTxCountTask.Result,
+            IsContract = isEvmContract
         });
     }
     catch (Exception ex)
