@@ -605,6 +605,52 @@ app.MapGet("/referral/{address}", (
     return Results.Ok(stats);
 });
 
+// --- GET /status/{address} (v2.2) ---
+app.MapGet("/status/{address}", async (
+    string address,
+    EthereumService ethService,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("status");
+    var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
+    address = address.Trim();
+
+    try
+    {
+        var web3 = ethService.GetWeb3(chain);
+
+        if (address.EndsWith(".eth"))
+        {
+            try { address = await ethService.ResolveEnsToAddressAsync(web3, address); }
+            catch { return Results.BadRequest(new { error = "Could not resolve ENS name" }); }
+        }
+
+        var balanceTask = ethService.GetEthBalanceAsync(web3, address);
+        var txCountTask = ethService.GetTransactionCountAsync(web3, address);
+        var codeTask = web3.Eth.GetCode.SendRequestAsync(address);
+
+        await Task.WhenAll(balanceTask, txCountTask, codeTask);
+
+        var code = codeTask.Result;
+        var isContract = !string.IsNullOrEmpty(code) && code != "0x" && code != "0x0";
+
+        return Results.Ok(new WalletStatusResponse
+        {
+            Address = address,
+            Chain = chain,
+            EthBalance = balanceTask.Result,
+            TransactionCount = txCountTask.Result,
+            IsContract = isContract
+        });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
 // --- GET /whales/{chain}/recent (v2.0) ---
 app.MapGet("/whales/{chain}/recent", async (
     string chain,

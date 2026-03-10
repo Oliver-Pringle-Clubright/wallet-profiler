@@ -503,6 +503,19 @@ public class FreemiumProfile
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
+// --- v2.2: Wallet Status (Discovery) ---
+
+public class WalletStatusResponse
+{
+    public string Address { get; set; } = string.Empty;
+    public string Chain { get; set; } = "ethereum";
+    public string? EnsName { get; set; }
+    public decimal EthBalance { get; set; }
+    public int TransactionCount { get; set; }
+    public bool IsContract { get; set; }
+    public DateTime CheckedAt { get; set; } = DateTime.UtcNow;
+}
+
 // --- v2.0: Whale Alerts ---
 
 public class WhaleAlert

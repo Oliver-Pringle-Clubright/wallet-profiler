@@ -1,4 +1,4 @@
-# Wallet Profiler v2.0 — Technical Specifications
+# Wallet Profiler v2.2 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -108,6 +108,24 @@ wallet-profiler/
 **Error:** `400 Bad Request` — `{ "error": "..." }`
 
 **Concurrency:** Up to 5 addresses processed in parallel. Cached profiles return instantly.
+
+### GET /status/{address} (v2.2)
+
+**Ultra-fast wallet status check.** No scoring or token data — just raw chain data for pre-filtering.
+
+| Field | Type | Description |
+|---|---|---|
+| `address` | string | Resolved wallet address |
+| `chain` | string | Chain queried |
+| `ensName` | string? | ENS name if resolved |
+| `ethBalance` | decimal | Native token balance |
+| `transactionCount` | int | Total tx count |
+| `isContract` | bool | True if address is a smart contract |
+| `checkedAt` | datetime | Timestamp |
+
+**Query parameters:** `?chain=ethereum` (default: ethereum)
+
+**Response time:** ~200ms (3 parallel RPC calls, minimal processing).
 
 ### GET /trust/{address}
 

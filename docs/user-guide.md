@@ -1,4 +1,4 @@
-# Wallet Profiler v2.0 — User Guide
+# Wallet Profiler v2.2 — User Guide
 
 ## Overview
 
@@ -102,6 +102,28 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 ```
 
 Both `chain` (defaults to `"ethereum"`) and `tier` (defaults to `"standard"`) are optional.
+
+### Wallet Status (Discovery)
+
+**Endpoint:** `GET /status/{address}?chain=ethereum`
+
+Ultra-fast wallet status check (~200ms). Returns raw chain data without scoring or token analysis. Ideal for high-volume pre-filtering.
+
+```bash
+curl http://localhost:5000/status/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+```
+
+**Response:**
+```json
+{
+  "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+  "chain": "ethereum",
+  "ethBalance": 32.13,
+  "transactionCount": 1647,
+  "isContract": false,
+  "checkedAt": "2026-03-10T12:00:00Z"
+}
+```
 
 ### Quick Trust Check
 

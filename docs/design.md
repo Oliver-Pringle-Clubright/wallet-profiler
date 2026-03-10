@@ -1,4 +1,4 @@
-# Wallet Profiler v2.0 — Design Document
+# Wallet Profiler v2.2 — Design Document
 
 ## 1. Problem Statement
 
@@ -355,3 +355,7 @@ Updated from legacy `fee`/`requirements` format to ACP CLI v0.4.0 schema:
 ### Etherscan V2 Unified API
 
 All chain queries use the Etherscan V2 unified endpoint with `chainid` parameter. A single Etherscan API key covers all 7 supported chains — no separate Basescan or Arbiscan keys required.
+
+## 15. v2.2 — Discovery Offering (walletstatus)
+
+Added ultra-fast `walletstatus` offering as the cheapest entry point ($0.01). `GET /status/{address}` returns address, chain, ETH balance, transaction count, and contract detection (isContract) in under 3 seconds. No scoring, no tokens — just raw chain data. Designed for agents doing high-volume pre-filtering before calling higher-tier offerings.
