@@ -1,4 +1,4 @@
-# Wallet Profiler v2.2 — Design Document
+# Wallet Profiler v2.3 — Design Document
 
 ## 1. Problem Statement
 
@@ -359,3 +359,7 @@ All chain queries use the Etherscan V2 unified endpoint with `chainid` parameter
 ## 15. v2.2 — Discovery Offering (walletstatus)
 
 Added ultra-fast `walletstatus` offering as the cheapest entry point ($0.01). `GET /status/{address}` returns address, chain, ETH balance, transaction count, and contract detection (isContract) in under 3 seconds. No scoring, no tokens — just raw chain data. Designed for agents doing high-volume pre-filtering before calling higher-tier offerings.
+
+## 16. v2.3 — Cross-Chain Deep Analysis & NFT Differentiation
+
+Upgraded `deepanalysis` offering to use cross-chain aggregation by default. When chain is omitted or set to "all", the handler calls `/profile/multi-chain` to profile the wallet across all 7 EVM chains in a single request. This provides a complete cross-chain portfolio view including total value across chains, active chain detection, and per-chain breakdowns — all at premium tier with AI summary. Updated walletprofiler offering description to emphasize NFT portfolio with floor prices and DeFi positions as key differentiators.

@@ -1,4 +1,4 @@
-# Wallet Profiler v2.2 — Technical Specifications
+# Wallet Profiler v2.3 — Technical Specifications
 
 ## 1. Technology Stack
 
