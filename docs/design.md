@@ -1,4 +1,4 @@
-# Wallet Profiler v2.6 — Design Document
+# Wallet Profiler v2.7 — Design Document
 
 ## 1. Problem Statement
 
@@ -385,6 +385,10 @@ Deepanalysis is the highest-margin offering ($0.10/job). Enhanced with automatic
 | walletprofiler | $0.03 | ~5s | Full profiling, batch analysis |
 | tokenholders | $0.05 | ~8s | Token concentration, rug pull risk |
 | deepanalysis | $0.10 | ~15s | Cross-chain, comparison, AI summary |
+
+## 20. v2.7 — Risk Score Offering
+
+Added standalone `riskscore` offering at $0.02 — competitive with ChainScope's `risk_score` ($0.05). `GET /risk/{address}` builds a basic profile and extracts risk-specific data: risk score (0-100), risk level, verdict (SAFE/CAUTION/WARNING/DANGER), risk flags, OFAC sanctions screening, token approval counts, and wallet classification tags. Fills a gap in the offering lineup between quickcheck ($0.01 trust score) and walletprofiler ($0.03 full profile).
 
 ## 19. v2.6 — Solana Support
 

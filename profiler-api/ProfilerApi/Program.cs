@@ -655,6 +655,54 @@ app.MapGet("/referral/{address}", (
     return Results.Ok(stats);
 });
 
+// --- GET /risk/{address} (v2.7) ---
+app.MapGet("/risk/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("risk_score");
+    var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
+    address = address.Trim();
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "basic");
+
+        var verdict = profile.Risk.Score switch
+        {
+            >= 70 => "DANGER",
+            >= 50 => "WARNING",
+            >= 30 => "CAUTION",
+            _ => "SAFE"
+        };
+
+        return Results.Ok(new RiskScoreResponse
+        {
+            Address = address,
+            Chain = chain,
+            RiskScore = profile.Risk.Score,
+            RiskLevel = profile.Risk.Level,
+            Verdict = verdict,
+            RiskFlags = profile.Risk.Flags,
+            Tags = profile.Tags,
+            IsSanctioned = profile.Sanctions?.IsSanctioned ?? false,
+            SanctionsRisk = profile.Sanctions?.RiskLevel ?? "clear",
+            ApprovalRiskCount = profile.ApprovalRisk?.TotalApprovals ?? 0,
+            UnlimitedApprovals = profile.ApprovalRisk?.UnlimitedApprovals ?? 0
+        });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
 // --- GET /status/{address} (v2.2, Solana v2.6) ---
 app.MapGet("/status/{address}", async (
     string address,

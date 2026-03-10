@@ -503,6 +503,24 @@ public class FreemiumProfile
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
+// --- v2.7: Risk Score ---
+
+public class RiskScoreResponse
+{
+    public string Address { get; set; } = string.Empty;
+    public string Chain { get; set; } = "ethereum";
+    public int RiskScore { get; set; }
+    public string RiskLevel { get; set; } = "unknown";
+    public string Verdict { get; set; } = "UNKNOWN";
+    public List<string> RiskFlags { get; set; } = [];
+    public List<string> Tags { get; set; } = [];
+    public bool IsSanctioned { get; set; }
+    public string SanctionsRisk { get; set; } = "clear";
+    public int ApprovalRiskCount { get; set; }
+    public int UnlimitedApprovals { get; set; }
+    public DateTime CheckedAt { get; set; } = DateTime.UtcNow;
+}
+
 // --- v2.2: Wallet Status (Discovery) ---
 
 public class WalletStatusResponse

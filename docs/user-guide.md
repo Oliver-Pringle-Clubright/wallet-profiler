@@ -1,4 +1,4 @@
-# Wallet Profiler v2.6 — User Guide
+# Wallet Profiler v2.7 — User Guide
 
 ## Overview
 
