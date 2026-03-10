@@ -1,0 +1,35 @@
+services:
+  profiler-api:
+    build:
+      context: ../profiler-api
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    env_file: .env
+    environment:
+      - Alchemy__ApiKey=${ALCHEMY_API_KEY}
+      - Etherscan__ApiKey=${ETHERSCAN_API_KEY}
+      - Basescan__ApiKey=${BASESCAN_API_KEY:-}
+      - Arbiscan__ApiKey=${ARBISCAN_API_KEY:-}
+    healthcheck:
+      test: ["CMD-SHELL", "dotnet --info > /dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  acp-runtime:
+    build:
+      context: ../../
+      dockerfile: wallet-profiler/deploy/Dockerfile.acp-runtime
+    depends_on:
+      profiler-api:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - PROFILER_API_URL=http://profiler-api:5000
+      - LITE_AGENT_API_KEY=${LITE_AGENT_API_KEY}
+    volumes:
+      - ./acp-config.json:/app/config.json:ro
+    restart: unless-stopped

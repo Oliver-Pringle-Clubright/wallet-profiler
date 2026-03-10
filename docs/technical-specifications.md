@@ -1,4 +1,4 @@
-# Wallet Profiler v1.8 — Technical Specifications
+# Wallet Profiler v2.0 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -1159,3 +1159,34 @@ Compares multiple wallet profiles side-by-side with automated insights.
 3. Common token detection via set intersection
 4. Automated insights: value spread, risk comparison, DeFi participation, smart money classification, trust score average
 5. Up to 10 wallets per comparison
+
+### 5.31 ACP Seller Runtime (v2.0)
+
+TypeScript proxy (`handlers.ts`) running inside the `virtuals-protocol-acp` seller runtime. Connects via Socket.io WebSocket to `acpx.virtuals.io`, authenticates by wallet address, and listens for `onNewTask` and `onEvaluate` events.
+
+**Handler functions:**
+- `validateRequirements(request)` — validates address format (hex or .eth ENS), chain enum, and tier enum. Returns `{ valid, reason }`.
+- `executeJob(request)` — proxies to the C# Profiler API via HTTP POST. Supports single (`/profile`) and batch (`/profile/batch`) endpoints. Returns `{ deliverable: JSON.stringify(result) }`.
+- `requestPayment(request)` — returns a tier-specific payment message.
+
+**Docker networking:** The ACP runtime container resolves `profiler-api` via Docker Compose's internal DNS, connecting to `http://profiler-api:5000`.
+
+### 5.32 Docker Compose Architecture (v2.0)
+
+```
+┌─────────────────────────────────────────────────┐
+│  EC2 Instance (Ubuntu 24.04)                    │
+│                                                 │
+│  ┌─────────────────┐  ┌──────────────────────┐  │
+│  │  profiler-api    │  │  acp-runtime         │  │
+│  │  .NET 10         │◄─│  Node.js 22          │  │
+│  │  Port 5000       │  │  WebSocket to ACP    │  │
+│  │  Health checked  │  │  config.json mounted │  │
+│  └─────────────────┘  └──────────────────────┘  │
+│         Docker Compose internal network         │
+└─────────────────────────────────────────────────┘
+```
+
+**Container restart policy:** `unless-stopped` — both containers auto-restart on crash or EC2 reboot.
+
+**Health check:** profiler-api checked every 5s with 10s start period. acp-runtime depends on profiler-api health before starting.

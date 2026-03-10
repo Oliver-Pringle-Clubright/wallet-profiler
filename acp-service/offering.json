@@ -1,25 +1,29 @@
 {
   "name": "wallet-profiler",
-  "description": "Comprehensive on-chain wallet profiler with tiered pricing. Basic: balances + risk score. Standard: + USD prices + DeFi + activity. Premium: + natural language summary. Supports Ethereum, Base, and Arbitrum. Spam token detection included at all tiers.",
-  "fee": "0.001",
-  "requirements": {
+  "description": "Comprehensive on-chain wallet profiler with 4 pricing tiers. Free: balance + risk. Basic: + tokens + spam detection. Standard: + USD prices + DeFi + NFTs + sanctions + smart money + MEV detection. Premium: + natural language summary. Supports 7 chains: Ethereum, Base, Arbitrum, Polygon, Optimism, Avalanche, BNB. Additional endpoints: token holder analysis, portfolio history, wallet comparison, social identity, reputation badges, and agent referral program.",
+  "jobFee": 0.01,
+  "jobFeeType": "fixed",
+  "requiredFunds": false,
+  "requirement": {
     "type": "object",
     "properties": {
       "address": {
         "type": "string",
-        "description": "Wallet address (0x...) or ENS name (e.g. vitalik.eth)"
+        "description": "Wallet address (0x...) or ENS name (e.g. vitalik.eth). Comma-separated for batch."
       },
       "chain": {
         "type": "string",
-        "enum": ["ethereum", "base", "arbitrum"],
+        "enum": ["ethereum", "base", "arbitrum", "polygon", "optimism", "avalanche", "bnb"],
         "description": "Target chain (defaults to ethereum)"
       },
       "tier": {
         "type": "string",
-        "enum": ["basic", "standard", "premium"],
-        "description": "Service tier: basic (0.0005 ETH), standard (0.001 ETH), premium (0.003 ETH). Defaults to standard."
+        "enum": ["free", "basic", "standard", "premium"],
+        "description": "Service tier: free (0 ETH), basic (0.0005 ETH), standard (0.001 ETH), premium (0.003 ETH). Defaults to standard."
       }
     },
     "required": ["address"]
-  }
+  },
+  "deliverable": "string",
+  "slaMinutes": 5
 }

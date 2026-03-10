@@ -3,6 +3,9 @@
 
 const PROFILER_API_URL = process.env.PROFILER_API_URL || "http://localhost:5000";
 
+const VALID_CHAINS = ["ethereum", "base", "arbitrum", "polygon", "optimism", "avalanche", "bnb"];
+const VALID_TIERS = ["free", "basic", "standard", "premium"];
+
 interface Job {
   id: string;
   requirements: {
@@ -19,21 +22,23 @@ export async function validateRequirements(requirements: Record<string, unknown>
     return { valid: false, error: "address is required" };
   }
 
-  const isHexAddress = /^0x[a-fA-F0-9]{40}$/.test(address);
-  const isEns = address.endsWith(".eth");
-
-  if (!isHexAddress && !isEns) {
-    return { valid: false, error: "address must be a valid 0x address or .eth ENS name" };
+  const addresses = address.split(",").map((a: string) => a.trim()).filter(Boolean);
+  for (const addr of addresses) {
+    const isHexAddress = /^0x[a-fA-F0-9]{40}$/.test(addr);
+    const isEns = addr.endsWith(".eth");
+    if (!isHexAddress && !isEns) {
+      return { valid: false, error: `invalid address: ${addr} — must be a valid 0x address or .eth ENS name` };
+    }
   }
 
   const chain = requirements.chain as string | undefined;
-  if (chain && !["ethereum", "base", "arbitrum"].includes(chain)) {
-    return { valid: false, error: "chain must be one of: ethereum, base, arbitrum" };
+  if (chain && !VALID_CHAINS.includes(chain)) {
+    return { valid: false, error: `chain must be one of: ${VALID_CHAINS.join(", ")}` };
   }
 
   const tier = requirements.tier as string | undefined;
-  if (tier && !["basic", "standard", "premium"].includes(tier)) {
-    return { valid: false, error: "tier must be one of: basic, standard, premium" };
+  if (tier && !VALID_TIERS.includes(tier)) {
+    return { valid: false, error: `tier must be one of: ${VALID_TIERS.join(", ")}` };
   }
 
   return { valid: true };

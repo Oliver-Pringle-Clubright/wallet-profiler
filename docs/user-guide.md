@@ -1,4 +1,4 @@
-# Wallet Profiler v1.8 — User Guide
+# Wallet Profiler v2.0 — User Guide
 
 ## Overview
 
@@ -702,6 +702,36 @@ curl http://localhost:5000/health
 ## Running as an AGDP Service
 
 See [DEPLOY.md](../DEPLOY.md) for full deployment instructions.
+
+### AWS Deployment (v2.0)
+
+The service runs on AWS EC2 via Docker Compose. Two containers:
+
+1. **profiler-api** — C# backend on port 5000
+2. **acp-runtime** — ACP seller runtime (WebSocket to marketplace)
+
+**Quick start:**
+```bash
+# On EC2 (Ubuntu 24.04)
+cd ~/wallet-profiler/deploy
+cp .env.example .env        # fill in API keys
+# create acp-config.json    # agent credentials
+docker-compose up -d --build
+```
+
+**Monitor:**
+```bash
+docker-compose ps            # container status
+docker-compose logs -f       # live logs
+docker-compose logs acp-runtime  # ACP connection status
+```
+
+**From local machine (ACP CLI):**
+```bash
+acp browse WalletProfiler   # verify marketplace listing
+acp job active               # check incoming jobs
+acp wallet balance           # check earnings
+```
 
 ## Troubleshooting
 

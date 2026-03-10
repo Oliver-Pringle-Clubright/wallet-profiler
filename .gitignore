@@ -22,6 +22,9 @@ npm-debug.log*
 ## Environment / Secrets
 .env
 appsettings.Development.json
+*.pem
+AWS/
+deploy/.env
 
 ## OS
 Thumbs.db

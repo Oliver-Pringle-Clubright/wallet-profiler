@@ -1,4 +1,4 @@
-# Wallet Profiler v1.8 — Design Document
+# Wallet Profiler v2.0 — Design Document
 
 ## 1. Problem Statement
 
@@ -312,3 +312,46 @@ Two endpoints for a referral system: `POST /referral/register` generates a uniqu
 ### Wallet Comparison
 
 `POST /compare` takes 2-10 wallet addresses and builds profiles for each, then generates a side-by-side comparison with: value rankings, common tokens, risk comparison, DeFi participation comparison, smart money classification, trust score averages, and unique insights. Essential for agents doing competitive analysis, portfolio benchmarking, or counterparty evaluation.
+
+## 14. v2.0 — Production Deployment & ACP Marketplace
+
+### ACP Marketplace Integration
+
+The WalletProfiler agent (ID 19462) is live on the ACP marketplace at app.virtuals.io. Registered as a seller with the `walletprofiler` offering at $0.01 USDC per job. The ACP seller runtime connects via WebSocket to `acpx.virtuals.io`, listens for incoming job requests, validates requirements (address format, chain, tier), and proxies execution to the C# Profiler API.
+
+### AWS EC2 Deployment
+
+Production runs on AWS EC2 using Docker Compose with two containers:
+
+- **profiler-api**: .NET 10 ASP.NET Minimal API container (`mcr.microsoft.com/dotnet/aspnet:10.0`), exposed on port 5000, with health check and auto-restart.
+- **acp-runtime**: Node.js 22 container running the ACP seller runtime (`src/seller/runtime/seller.ts`), maintains persistent WebSocket connection to ACP, forwards jobs to the profiler-api container via Docker internal networking.
+
+Configuration is managed through environment variables (`.env` file for API keys) and a mounted `acp-config.json` for agent credentials. The deployment scripts handle tarball creation, SCP upload, and Docker Compose orchestration.
+
+### Deployment Files
+
+| File | Purpose |
+|---|---|
+| `deploy/docker-compose.yml` | Two-service orchestration with health checks |
+| `deploy/Dockerfile.acp-runtime` | ACP seller runtime container build |
+| `deploy/.env.example` | Template for API keys and ACP agent credentials |
+| `deploy/ec2-setup.sh` | EC2 instance bootstrap (Docker installation) |
+| `deploy/deploy.sh` | Local-to-EC2 deployment automation |
+| `profiler-api/Dockerfile` | C# API multi-stage build |
+
+### ACP Offering Schema (v2.0)
+
+Updated from legacy `fee`/`requirements` format to ACP CLI v0.4.0 schema:
+
+| Field | Value |
+|---|---|
+| `name` | `walletprofiler` |
+| `jobFee` | `0.01` (USDC) |
+| `jobFeeType` | `fixed` |
+| `requiredFunds` | `false` |
+| `slaMinutes` | `5` |
+| `deliverable` | `string` (JSON-serialized profile) |
+
+### Etherscan V2 Unified API
+
+All chain queries use the Etherscan V2 unified endpoint with `chainid` parameter. A single Etherscan API key covers all 7 supported chains — no separate Basescan or Arbiscan keys required.
