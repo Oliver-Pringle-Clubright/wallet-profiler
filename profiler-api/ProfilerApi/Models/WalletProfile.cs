@@ -503,6 +503,34 @@ public class FreemiumProfile
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
+// --- v2.0: Whale Alerts ---
+
+public class WhaleAlert
+{
+    public string TxHash { get; set; } = string.Empty;
+    public string From { get; set; } = string.Empty;
+    public string FromLabel { get; set; } = string.Empty;
+    public string To { get; set; } = string.Empty;
+    public string ToLabel { get; set; } = string.Empty;
+    public string TokenSymbol { get; set; } = string.Empty;
+    public string TokenAddress { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public decimal? EstimatedValueUsd { get; set; }
+    public string Direction { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
+}
+
+public class WhaleAlertResponse
+{
+    public string Chain { get; set; } = string.Empty;
+    public int Hours { get; set; }
+    public decimal MinValueUsd { get; set; }
+    public int AlertCount { get; set; }
+    public List<WhaleAlert> Alerts { get; set; } = [];
+    public string? Error { get; set; }
+    public DateTime QueriedAt { get; set; } = DateTime.UtcNow;
+}
+
 // --- v1.3: Cross-Chain Aggregated Profile ---
 
 public class MultiChainRequest

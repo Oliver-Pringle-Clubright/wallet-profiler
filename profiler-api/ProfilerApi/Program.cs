@@ -47,6 +47,7 @@ builder.Services.AddHttpClient<NftService>();
 builder.Services.AddHttpClient<TransferHistoryService>();
 builder.Services.AddHttpClient<TokenHolderService>();
 builder.Services.AddHttpClient<MevDetectionService>();
+builder.Services.AddHttpClient<WhaleAlertService>();
 
 var app = builder.Build();
 
@@ -602,6 +603,34 @@ app.MapGet("/referral/{address}", (
 {
     var stats = referralService.GetStats(address);
     return Results.Ok(stats);
+});
+
+// --- GET /whales/{chain}/recent (v2.0) ---
+app.MapGet("/whales/{chain}/recent", async (
+    string chain,
+    WhaleAlertService whaleService,
+    SlaTrackingService sla,
+    int? hours,
+    decimal? minValue) =>
+{
+    using var tracker = sla.Track("whale_alerts");
+    try
+    {
+        var result = await whaleService.GetRecentWhaleTransfersAsync(
+            chain.ToLowerInvariant(),
+            hours ?? 24,
+            minValue ?? 100_000m);
+
+        if (result.Error != null)
+            return Results.BadRequest(new { error = result.Error });
+
+        return Results.Ok(result);
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = ex.Message });
+    }
 });
 
 // --- GET /sla (v1.5) ---
