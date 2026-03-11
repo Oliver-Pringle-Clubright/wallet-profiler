@@ -1,4 +1,4 @@
-# Wallet Profiler v2.8 — User Guide
+# Wallet Profiler v2.9 — User Guide
 
 ## Overview
 
@@ -645,6 +645,53 @@ Returns a unique referral code. Share it with other agents — earn 10% commissi
 
 **Check stats:** `GET /referral/{address}`
 Returns total referrals, total earnings, and recent referral records.
+
+### Risk Score (v2.7)
+
+**Endpoint:** `GET /risk/{address}?chain=ethereum`
+
+Standalone risk assessment with verdict and flags. Fills the gap between quickcheck ($0.01) and walletprofiler ($0.03).
+
+```bash
+curl http://localhost:5000/risk/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+```
+
+**Response:**
+```json
+{
+  "address": "0xd8d...045",
+  "chain": "ethereum",
+  "riskScore": 35,
+  "riskLevel": "medium",
+  "verdict": "CAUTION",
+  "riskFlags": ["No transaction history found", "Interacts with very few addresses"],
+  "tags": ["ens-holder", "diversified"],
+  "isSanctioned": false,
+  "sanctionsRisk": "clear",
+  "approvalRiskCount": 0,
+  "unlimitedApprovals": 0,
+  "checkedAt": "2026-03-11T22:43:49Z"
+}
+```
+
+| Verdict | Score Range | Meaning |
+|---|---|---|
+| SAFE | 0-19 | Low risk, well-established wallet |
+| CAUTION | 20-49 | Some risk indicators, proceed carefully |
+| WARNING | 50-74 | Multiple risk factors present |
+| DANGER | 75-100 | High risk, avoid transacting |
+
+### Virtuals Ecosystem Intelligence (v2.8)
+
+**Endpoint:** `GET /virtuals/ecosystem`
+
+Live Virtuals Protocol ecosystem data. No parameters required. Cached for 5 minutes.
+
+```bash
+curl http://localhost:5000/virtuals/ecosystem
+```
+
+Returns VIRTUAL token price, top AI agent tokens ($AIXBT, $GAME, $LUNA, $VADER, $SEKOIA, $AIMONICA), ecosystem total market cap, 24h volume, health sentiment, and a natural language summary.
 
 ### Risk Score Interpretation
 

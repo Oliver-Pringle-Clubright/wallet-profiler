@@ -55,6 +55,7 @@ public class VirtualsIntelService
 
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "WalletProfiler/2.9");
             var response = await _httpClient.GetAsync(url);
 
             if (!response.IsSuccessStatusCode)

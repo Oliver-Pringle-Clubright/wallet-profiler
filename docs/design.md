@@ -1,4 +1,4 @@
-# Wallet Profiler v2.8 — Design Document
+# Wallet Profiler v2.9 — Design Document
 
 ## 1. Problem Statement
 
@@ -375,12 +375,14 @@ Updated all 6 ACP offering descriptions with:
 
 Deepanalysis is the highest-margin offering ($0.10/job). Enhanced with automatic wallet comparison when multiple addresses are provided — the batch response now includes a `comparison` object with common tokens, leader identification, and unique insights alongside individual profiles. This makes deepanalysis the go-to offering for comprehensive multi-wallet intelligence.
 
-### ACP Offering Lineup (v2.5)
+### ACP Offering Lineup (v2.9)
 
 | Offering | Fee | Response | Use Case |
 |---|---|---|---|
-| walletstatus | $0.01 | ~200ms | Pre-filtering, address validation |
-| quickcheck | $0.01 | ~500ms | Trust scoring, counterparty check |
+| walletstatus | $0.01 | ~200ms | Pre-filtering, address validation (8 chains incl. Solana) |
+| quickcheck | $0.01 | ~500ms | Trust scoring, counterparty check (8 chains incl. Solana) |
+| virtualsintel | $0.01 | ~2s | Virtuals ecosystem intelligence, AI agent token tracking |
+| riskscore | $0.02 | ~3s | Risk assessment, AML, fraud detection (7 EVM chains) |
 | whalealerts | $0.02 | ~3s | Exchange flow, whale tracking |
 | walletprofiler | $0.03 | ~5s | Full profiling, batch analysis |
 | tokenholders | $0.05 | ~8s | Token concentration, rug pull risk |
@@ -393,6 +395,36 @@ Added `virtualsintel` offering at $0.01 — serves the Virtuals community direct
 ## 20. v2.7 — Risk Score Offering
 
 Added standalone `riskscore` offering at $0.02 — competitive with ChainScope's `risk_score` ($0.05). `GET /risk/{address}` builds a basic profile and extracts risk-specific data: risk score (0-100), risk level, verdict (SAFE/CAUTION/WARNING/DANGER), risk flags, OFAC sanctions screening, token approval counts, and wallet classification tags. Fills a gap in the offering lineup between quickcheck ($0.01 trust score) and walletprofiler ($0.03 full profile).
+
+## 22. v2.9 — Marketplace Optimization & Production Deployment
+
+### Offering Description Refresh
+
+All 8 ACP offerings were deleted and re-registered on the marketplace to push updated descriptions. Previous offerings created before v2.4 still showed stale descriptions without response times, keyword optimization, or Solana support. The refresh ensures marketplace listings match the local `offering.json` files:
+
+- **walletstatus**: Now correctly shows "8 chains" and includes Solana in the chain enum
+- **quickcheck**: Updated with "8 chains" and Solana support
+- **deepanalysis**: Cross-chain aggregation description with "all 7 EVM chains"
+- **tokenholders**: Response time and keyword-optimized description
+- **whalealerts**: Response time and keyword-optimized description
+- **walletprofiler**: Full feature list with response time claims
+
+### Agent Profile Update
+
+Updated the agent profile description via `acp profile update` to reflect current capabilities: 8 offerings across 8 chains including Solana, with comprehensive feature enumeration for marketplace discovery.
+
+### CoinGecko API Fix
+
+Added `User-Agent` header to `VirtualsIntelService` HTTP requests. CoinGecko's free API returns 403 Forbidden without a User-Agent header when called from server environments. Fix ensures the `virtualsintel` offering works reliably in production.
+
+### EC2 Redeployment
+
+Full rebuild of both Docker containers (profiler-api and acp-runtime) on EC2 with all v2.6-v2.9 changes. All endpoints verified:
+- `/health` — healthy
+- `/status/{address}` — working (including Solana)
+- `/trust/{address}` — working
+- `/risk/{address}` — working
+- `/virtuals/ecosystem` — working (CoinGecko fix applied)
 
 ## 19. v2.6 — Solana Support
 

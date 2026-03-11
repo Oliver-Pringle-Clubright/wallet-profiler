@@ -1,4 +1,4 @@
-# Wallet Profiler v2.8 — Technical Specifications
+# Wallet Profiler v2.9 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -14,6 +14,8 @@
 | **Containerization** | Docker / Docker Compose | Latest |
 | **Blockchain Data** | Alchemy JSON-RPC + Etherscan V2 | Latest |
 | **Price Data** | DeFi Llama API | Free tier |
+| **Ecosystem Data** | CoinGecko API | Free tier |
+| **Solana RPC** | Alchemy / Public RPC | Free tier |
 
 ## 2. Project Structure
 
@@ -62,7 +64,9 @@ wallet-profiler/
 │           ├── ReputationBadgeService.cs # On-chain reputation badge (v1.7)
 │           ├── SocialIdentityService.cs # Social identity correlation (v1.8)
 │           ├── ReferralService.cs       # Agent referral program (v1.8)
-│           └── WalletComparisonService.cs # Wallet comparison (v1.8)
+│           ├── WalletComparisonService.cs # Wallet comparison (v1.8)
+│           ├── SolanaService.cs          # Solana JSON-RPC client (v2.6)
+│           └── VirtualsIntelService.cs   # CoinGecko ecosystem data (v2.8)
 ├── acp-service/                          # TypeScript ACP proxy
 │   ├── Dockerfile
 │   ├── package.json
@@ -143,6 +147,47 @@ wallet-profiler/
 | `factors` | string[] | Scoring breakdown |
 
 **Response time:** ~500ms (4 parallel RPC calls, no metadata resolution).
+
+### GET /risk/{address} (v2.7)
+
+**Standalone risk score assessment.** Returns risk-specific data extracted from a basic profile.
+
+| Field | Type | Description |
+|---|---|---|
+| `address` | string | Resolved wallet address |
+| `chain` | string | Chain queried |
+| `riskScore` | int | Risk score (0-100) |
+| `riskLevel` | string | `low`, `medium`, `high`, `critical` |
+| `verdict` | string | `SAFE`, `CAUTION`, `WARNING`, `DANGER` |
+| `riskFlags` | string[] | Specific risk indicators |
+| `tags` | string[] | Wallet classification tags |
+| `isSanctioned` | bool | OFAC sanctions status |
+| `sanctionsRisk` | string | `clear`, `caution`, `sanctioned` |
+| `approvalRiskCount` | int | Number of risky token approvals |
+| `unlimitedApprovals` | int | Unlimited approval count |
+| `checkedAt` | datetime | Timestamp |
+
+**Query parameters:** `?chain=ethereum` (default: ethereum)
+
+**Response time:** ~3s.
+
+### GET /virtuals/ecosystem (v2.8)
+
+**Virtuals Protocol ecosystem intelligence.** Returns live token data from CoinGecko with 5-minute cache.
+
+| Field | Type | Description |
+|---|---|---|
+| `virtualToken` | object | VIRTUAL token price, market cap, volume, changes |
+| `agentTokens` | array | Top AI agent tokens (AIXBT, GAME, LUNA, etc.) |
+| `ecosystemMarketCap` | decimal | Total ecosystem market cap |
+| `ecosystemVolume24h` | decimal | Total 24h volume |
+| `tokenCount` | int | Number of tokens tracked |
+| `ecosystemHealth` | string | `bullish`, `stable`, `cautious`, `bearish` |
+| `summary` | string | Natural language ecosystem summary |
+
+**Query parameters:** `?query=` (optional, for future filtering)
+
+**Response time:** ~2s (cached: instant).
 
 ### POST /profile/multi-chain (v1.3)
 
@@ -993,9 +1038,11 @@ Lightweight `GET /trust/{address}` endpoint that scores wallets without full pro
 
 | API | Free Tier Limits | Used For |
 |---|---|---|
-| **Alchemy** | 300M compute units/month | RPC, token balances, token metadata, ENS, DeFi reads, NFT API v3 |
+| **Alchemy** | 300M compute units/month | RPC, token balances, token metadata, ENS, DeFi reads, NFT API v3, Solana RPC |
 | **Etherscan V2** | 5 calls/sec | Transaction history (standard+ only) |
 | **DeFi Llama** | Unlimited (fair use) | ETH + token USD prices |
+| **CoinGecko** | 10-30 calls/min | Virtuals ecosystem token data (v2.8) |
+| **Solana JSON-RPC** | Unlimited (public) | SOL balance, tx count, SPL tokens (v2.6) |
 
 ## 8. Configuration
 
