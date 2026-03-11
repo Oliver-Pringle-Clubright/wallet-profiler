@@ -1,4 +1,4 @@
-# Wallet Profiler v2.7 — Design Document
+# Wallet Profiler v2.8 — Design Document
 
 ## 1. Problem Statement
 
@@ -385,6 +385,10 @@ Deepanalysis is the highest-margin offering ($0.10/job). Enhanced with automatic
 | walletprofiler | $0.03 | ~5s | Full profiling, batch analysis |
 | tokenholders | $0.05 | ~8s | Token concentration, rug pull risk |
 | deepanalysis | $0.10 | ~15s | Cross-chain, comparison, AI summary |
+
+## 21. v2.8 — Virtuals Ecosystem Intelligence
+
+Added `virtualsintel` offering at $0.01 — serves the Virtuals community directly. `GET /virtuals/ecosystem` fetches live data from CoinGecko (free API) for VIRTUAL token and top AI agent tokens ($AIXBT, $GAME, $LUNA, $VADER, $SEKOIA, $AIMONICA, $MISATO, $CONVO, $BIO). Returns prices, market caps, 24h volume, price changes, ecosystem totals, health sentiment, and natural language summary. Cached for 5 minutes to respect CoinGecko rate limits. Mirrors ChainScope's `virtuals_intel` offering — a key differentiator for marketplace relevance.
 
 ## 20. v2.7 — Risk Score Offering
 

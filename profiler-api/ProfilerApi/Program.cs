@@ -49,6 +49,7 @@ builder.Services.AddHttpClient<TokenHolderService>();
 builder.Services.AddHttpClient<MevDetectionService>();
 builder.Services.AddHttpClient<WhaleAlertService>();
 builder.Services.AddHttpClient<SolanaService>();
+builder.Services.AddHttpClient<VirtualsIntelService>();
 
 var app = builder.Build();
 
@@ -695,6 +696,29 @@ app.MapGet("/risk/{address}", async (
             ApprovalRiskCount = profile.ApprovalRisk?.TotalApprovals ?? 0,
             UnlimitedApprovals = profile.ApprovalRisk?.UnlimitedApprovals ?? 0
         });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// --- GET /virtuals/ecosystem (v2.8) ---
+app.MapGet("/virtuals/ecosystem", async (
+    VirtualsIntelService virtualsService,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("virtuals_intel");
+    var query = httpContext.Request.Query["query"].FirstOrDefault();
+
+    try
+    {
+        var report = await virtualsService.GetEcosystemReportAsync(query);
+        if (report.Error != null)
+            return Results.BadRequest(new { error = report.Error });
+        return Results.Ok(report);
     }
     catch (Exception ex)
     {
