@@ -1,7 +1,11 @@
+using System.Text.RegularExpressions;
 using ProfilerApi.Models;
 using ProfilerApi.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Request size limit (1MB max)
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 1_048_576);
 
 builder.Services.AddMemoryCache();
 
@@ -40,18 +44,45 @@ builder.Services.AddSingleton<WalletComparisonService>();
 builder.Services.AddScoped<ProfileOrchestrator>();
 builder.Services.AddSingleton<MonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorService>());
-builder.Services.AddHttpClient<TokenService>();
-builder.Services.AddHttpClient<ActivityService>();
-builder.Services.AddHttpClient<PriceService>();
-builder.Services.AddHttpClient<NftService>();
-builder.Services.AddHttpClient<TransferHistoryService>();
-builder.Services.AddHttpClient<TokenHolderService>();
-builder.Services.AddHttpClient<MevDetectionService>();
-builder.Services.AddHttpClient<WhaleAlertService>();
-builder.Services.AddHttpClient<SolanaService>();
-builder.Services.AddHttpClient<VirtualsIntelService>();
+builder.Services.AddHttpClient<TokenService>(c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<ActivityService>(c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<PriceService>(c => c.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient<NftService>(c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<TransferHistoryService>(c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<TokenHolderService>(c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<MevDetectionService>(c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<WhaleAlertService>(c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<SolanaService>(c => c.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient<VirtualsIntelService>(c => c.Timeout = TimeSpan.FromSeconds(15));
+
+// CORS — restrict to known origins (configurable via AllowedOrigins in appsettings)
+var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
+    ?? ["http://localhost:3000", "http://localhost:5000"];
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins(allowedOrigins)
+              .AllowAnyHeader()
+              .WithMethods("GET", "POST", "DELETE");
+    });
+});
 
 var app = builder.Build();
+
+app.UseCors();
+
+// --- Address validation helper ---
+static bool IsValidEvmAddress(string addr) =>
+    addr.Length == 42 && addr.StartsWith("0x") && Regex.IsMatch(addr, @"^0x[a-fA-F0-9]{40}$");
+
+// --- Security headers middleware ---
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    await next();
+});
 
 // --- API Key Authentication Middleware (v1.5) ---
 app.Use(async (context, next) =>
@@ -90,7 +121,8 @@ app.Use(async (context, next) =>
 app.MapPost("/profile", async (
     ProfileRequest request,
     ProfileOrchestrator orchestrator,
-    SlaTrackingService sla) =>
+    SlaTrackingService sla,
+    ILogger<Program> logger) =>
 {
     var address = request.Address.Trim();
     var chain = request.Chain.ToLowerInvariant();
@@ -98,6 +130,9 @@ app.MapPost("/profile", async (
 
     if (string.IsNullOrEmpty(address))
         return Results.BadRequest(new { error = "Address is required" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
 
     if (tier is not ("free" or "basic" or "standard" or "premium"))
         return Results.BadRequest(new { error = "Tier must be one of: free, basic, standard, premium" });
@@ -120,8 +155,9 @@ app.MapPost("/profile", async (
     }
     catch (Exception ex)
     {
+        logger.LogError(ex, "Profile failed for {Address} on {Chain}", address, chain);
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 
@@ -163,7 +199,7 @@ app.MapPost("/profile/batch", async (
         catch (Exception ex)
         {
             logger.LogError(ex, "Batch profile failed for {Address}", rawAddress);
-            return new BatchProfileResult { Address = rawAddress, Error = ex.Message };
+            return new BatchProfileResult { Address = rawAddress, Error = "Profile failed for this address" };
         }
         finally
         {
@@ -224,7 +260,7 @@ app.MapPost("/profile/multi-chain", async (
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Multi-chain profile failed for {Chain}", c);
-                return (Chain: c, Profile: (WalletProfile?)null, Error: ex.Message);
+                return (Chain: c, Profile: (WalletProfile?)null, Error: "Profile failed");
             }
         });
 
@@ -263,7 +299,7 @@ app.MapPost("/profile/multi-chain", async (
     catch (Exception ex)
     {
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 
@@ -280,6 +316,9 @@ app.MapGet("/trust/{address}", async (
     using var tracker = sla.Track("trust");
     address = address.Trim();
     var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth") && !SolanaService.IsValidSolanaAddress(address)))
+        return Results.BadRequest(new { error = "Invalid address format" });
 
     // Solana trust check
     if (ChainConfig.IsSolana(chain))
@@ -339,7 +378,7 @@ app.MapGet("/trust/{address}", async (
         catch (Exception ex)
         {
             tracker.MarkFailed();
-            return Results.BadRequest(new { error = $"Could not resolve ENS name: {ex.Message}" });
+            return Results.BadRequest(new { error = "Could not resolve ENS name" });
         }
     }
 
@@ -414,8 +453,15 @@ app.MapPost("/monitor", (
     if (string.IsNullOrEmpty(request.WebhookUrl))
         return Results.BadRequest(new { error = "WebhookUrl is required" });
 
-    var sub = monitorService.Subscribe(request);
-    return Results.Ok(sub);
+    try
+    {
+        var sub = monitorService.Subscribe(request);
+        return Results.Ok(sub);
+    }
+    catch (ArgumentException)
+    {
+        return Results.BadRequest(new { error = "Webhook URL must be a valid public HTTP/HTTPS URL" });
+    }
 });
 
 // --- GET /monitor (v1.3) ---
@@ -454,7 +500,7 @@ app.MapGet("/token/{contract}/holders", async (
     catch (Exception ex)
     {
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 
@@ -499,7 +545,7 @@ app.MapGet("/reputation/{address}", async (
     catch (Exception ex)
     {
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 
@@ -606,7 +652,7 @@ app.MapPost("/compare", async (
     catch (Exception ex)
     {
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 
@@ -631,7 +677,7 @@ app.MapGet("/identity/{address}", async (
     catch (Exception ex)
     {
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 
@@ -667,6 +713,9 @@ app.MapGet("/risk/{address}", async (
     var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
     address = address.Trim();
 
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
     try
     {
         if (address.EndsWith(".eth"))
@@ -700,7 +749,7 @@ app.MapGet("/risk/{address}", async (
     catch (Exception ex)
     {
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 
@@ -723,7 +772,7 @@ app.MapGet("/virtuals/ecosystem", async (
     catch (Exception ex)
     {
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 
@@ -738,6 +787,9 @@ app.MapGet("/status/{address}", async (
     using var tracker = sla.Track("status");
     var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
     address = address.Trim();
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth") && !SolanaService.IsValidSolanaAddress(address)))
+        return Results.BadRequest(new { error = "Invalid address format" });
 
     try
     {
@@ -793,7 +845,7 @@ app.MapGet("/status/{address}", async (
     catch (Exception ex)
     {
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 
@@ -821,7 +873,7 @@ app.MapGet("/whales/{chain}/recent", async (
     catch (Exception ex)
     {
         tracker.MarkFailed();
-        return Results.BadRequest(new { error = ex.Message });
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
     }
 });
 

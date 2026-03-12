@@ -30,8 +30,36 @@ public class MonitorService : BackgroundService
         _httpClientFactory = httpClientFactory;
     }
 
+    private static readonly HashSet<string> BlockedHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "localhost", "127.0.0.1", "0.0.0.0", "::1",
+        "169.254.169.254", "metadata.google.internal"
+    };
+
+    private static bool IsUnsafeWebhookUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return true;
+        if (uri.Scheme is not ("https" or "http"))
+            return true;
+        if (BlockedHosts.Contains(uri.Host))
+            return true;
+        if (System.Net.IPAddress.TryParse(uri.Host, out var ip))
+        {
+            var bytes = ip.GetAddressBytes();
+            // Block private ranges: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
+            if (bytes[0] == 10) return true;
+            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
+            if (bytes[0] == 192 && bytes[1] == 168) return true;
+        }
+        return false;
+    }
+
     public MonitorSubscription Subscribe(MonitorRequest request)
     {
+        if (IsUnsafeWebhookUrl(request.WebhookUrl))
+            throw new ArgumentException("Webhook URL must be a valid public HTTPS/HTTP URL");
+
         var sub = new MonitorSubscription
         {
             Address = request.Address.ToLowerInvariant(),
@@ -173,6 +201,7 @@ public class MonitorService : BackgroundService
         try
         {
             var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(10);
             var json = JsonSerializer.Serialize(alert, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
