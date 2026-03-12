@@ -1,4 +1,4 @@
-# Wallet Profiler v2.9 — Design Document
+# Wallet Profiler v3.0 — Design Document
 
 ## 1. Problem Statement
 
@@ -375,7 +375,7 @@ Updated all 6 ACP offering descriptions with:
 
 Deepanalysis is the highest-margin offering ($0.10/job). Enhanced with automatic wallet comparison when multiple addresses are provided — the batch response now includes a `comparison` object with common tokens, leader identification, and unique insights alongside individual profiles. This makes deepanalysis the go-to offering for comprehensive multi-wallet intelligence.
 
-### ACP Offering Lineup (v2.9)
+### ACP Offering Lineup (v3.0)
 
 | Offering | Fee | Response | Use Case |
 |---|---|---|---|
@@ -384,7 +384,15 @@ Deepanalysis is the highest-margin offering ($0.10/job). Enhanced with automatic
 | virtualsintel | $0.01 | ~2s | Virtuals ecosystem intelligence, AI agent token tracking |
 | riskscore | $0.02 | ~3s | Risk assessment, AML, fraud detection (7 EVM chains) |
 | whalealerts | $0.02 | ~3s | Exchange flow, whale tracking |
+| reputation | $0.02 | ~3s | On-chain reputation badge (soulbound NFT metadata) |
+| identity | $0.02 | ~3s | Social identity resolution (ENS, governance, social signals) |
+| gasspend | $0.02 | ~3s | Gas spending analysis, monthly breakdown, tax reporting |
 | walletprofiler | $0.03 | ~5s | Full profiling, batch analysis |
+| portfoliohistory | $0.03 | ~2s | Historical portfolio snapshots, value tracking |
+| tokenscreen | $0.03 | ~8s | Token holder distribution, whale detection, rug pull risk |
+| approvalaudit | $0.03 | ~5s | Token approval security audit, revoke recommendations |
+| walletcompare | $0.04 | ~10s | Compare 2-10 wallets side-by-side |
+| multichain | $0.05 | ~15s | Multi-chain profile across up to 5 EVM chains |
 | tokenholders | $0.05 | ~8s | Token concentration, rug pull risk |
 | deepanalysis | $0.10 | ~15s | Cross-chain, comparison, AI summary |
 
@@ -429,3 +437,82 @@ Full rebuild of both Docker containers (profiler-api and acp-runtime) on EC2 wit
 ## 19. v2.6 — Solana Support
 
 Added Solana as the 8th supported chain. Solana uses a separate `SolanaService` with JSON-RPC calls (`getBalance`, `getSignaturesForAddress`, `getTokenAccountsByOwner`, `getAccountInfo`) since it's non-EVM. Supported on `walletstatus` and `quickcheck` offerings — returns SOL balance, transaction count, SPL token count, and trust scoring. Uses Alchemy Solana RPC when configured, falls back to public `api.mainnet-beta.solana.com`. Solana addresses are base58-encoded (32-44 chars), automatically detected by validators.
+
+## 23. v3.0 — Service Enhancement & Offering Expansion
+
+### 8 New ACP Offerings
+
+Expanded from 8 to 16 marketplace offerings, doubling the service catalog:
+
+| New Offering | Fee | Endpoint | Description |
+|---|---|---|---|
+| multichain | $0.05 | POST `/profile/multi-chain` | Multi-chain wallet profile across up to 5 EVM chains |
+| reputation | $0.02 | GET `/reputation/{address}` | On-chain reputation badge with soulbound NFT metadata |
+| walletcompare | $0.04 | POST `/compare` | Compare 2-10 wallets side-by-side |
+| identity | $0.02 | GET `/identity/{address}` | Social identity resolution (ENS, governance, social signals) |
+| portfoliohistory | $0.03 | GET `/history/{address}` | Historical portfolio snapshots and value tracking |
+| tokenscreen | $0.03 | GET `/token/{contract}/holders` | Token holder distribution, whale detection, concentration risk |
+| gasspend | $0.02 | GET `/gas/{address}` | Gas spending analysis with monthly breakdown |
+| approvalaudit | $0.03 | GET `/profile` (extract) | Token approval security audit with revoke recommendations |
+
+### Gas Spending Endpoint (v3.0)
+
+New `GET /gas/{address}` endpoint fetches transaction history from Etherscan V2, calculates total gas spent in ETH and USD, average gas price in Gwei, monthly breakdown, and top 5 most expensive transactions. Useful for tax reporting and cost optimization.
+
+### 8 Service Enhancements
+
+**1. TransferHistoryService — Native ETH Transfers**
+Now fetches native ETH transfers (`txlist`) in parallel with ERC-20 token transfers (`tokentx`), merging into a unified timeline. Previously only tracked ERC-20 tokens, missing all native ETH sends/receives.
+
+**2. WalletClusteringService — Protocol-Aware Similarity**
+Added shared DeFi protocol detection — scores wallets by token overlap plus protocol usage patterns (Aave, Lido, Uniswap, etc.), not just Jaccard token similarity. Analyzes 15 candidates (up from 10) and detects DeFi token overlap for protocol-level similarity.
+
+**3. TokenHolderService — Holder Classification**
+Added holder classification tags: `major-holder` (>10% supply), `significant-holder` (>5%), `whale`, `exchange`, `dust-holder`, `known:category`. Labels known exchanges and protocols via ContractLabelService integration.
+
+**4. AcpTrustService — Negative Signals**
+Expanded from 7 positive factors to 14 total scoring factors, adding 5 negative signals: sanctions exposure (-30), risky approvals (-15), MEV victimhood (-10), critical risk level (-10), and dormant wallet inactivity (-5). Also added NFT holdings and transfer history depth as positive factors.
+
+**5. ContractLabelService — 130+ Contracts**
+Expanded from ~45 to 130+ known Ethereum contracts. New categories include: Uniswap Permit2, 1inch V6, Curve pools, Balancer V2, Blur/Sudoswap, EigenLayer strategies, Ethena, EtherFi, Frax, Yearn vaults, Convex, MakerDAO (sDAI, DSR, Pot), CEX hot wallets (Binance, Coinbase, Kraken, Gemini), governance contracts (Nouns, Gitcoin), and more bridges (Across, Hop, LayerZero, CCIP).
+
+**6. RevokeRecommendationService — Exploit Database**
+Populated `HighRiskSpenders` with 18 real-world exploited or deprecated contracts: Multichain ($130M, Jul 2023), Euler Finance ($197M, Mar 2023), Ronin Bridge ($625M, Mar 2022), Wormhole ($326M, Feb 2022), Nomad Bridge ($190M, Aug 2022), BadgerDAO ($120M, Dec 2021), Cream Finance, deprecated OpenSea Wyvern, and more. Added "critical" priority level, mixer detection, and trusted protocol classification (Aave, Lido, EigenLayer, MakerDAO).
+
+**7. SnapshotService — Redis Persistence**
+Portfolio snapshots now persist to Redis with 90-day TTL, surviving container restarts and redeployments. Falls back to in-memory when Redis is unavailable. Increased max snapshots per address from 100 to 200.
+
+**8. DeFiService — 9 Protocol Support**
+Expanded from 2 protocols (Aave V3, Compound V3) to 9, all checked in parallel:
+
+| Protocol | Assets Detected | Type |
+|---|---|---|
+| Aave V3 | Aggregate collateral/debt (USD) | lending |
+| Compound V3 | cUSDC balance | lending |
+| Lido | stETH, wstETH | staking |
+| Rocket Pool | rETH | staking |
+| Coinbase | cbETH | staking |
+| EtherFi | weETH | staking |
+| Frax | sfrxETH | staking |
+| MakerDAO | sDAI (DSR savings) | savings |
+| EigenLayer | stETH, cbETH, rETH strategies | restaking |
+| Ethena | sUSDe | yield |
+
+### Security Hardening (v3.0)
+
+12 security fixes deployed in this release:
+- Input validation on all endpoints (chain, address format, parameter bounds)
+- Case-insensitive API key header matching
+- Auth bypass prevention via path normalization
+- Exception message sanitization (no internal details leaked)
+- Rate limit memory cleanup timer (every 5 minutes)
+- Batch address validation (max 255 chars, format check)
+- Parameter clamping (limit: 1-100, hours: 1-168, query: max 500 chars)
+
+### Performance Optimizations (v3.0)
+
+- Parallelized 5 premium service calls (approvals, NFTs, transfers, clustering, MEV) via Task.WhenAll — premium profile build dropped from ~40s to ~12s
+- Token metadata semaphore raised from 10 to 20 concurrent calls
+- NFT floor price semaphore raised from 5 to 10 concurrent calls
+- Price cache TTL increased from 1 min to 15 min
+- Added 24h token metadata cache and 1h NFT floor price cache

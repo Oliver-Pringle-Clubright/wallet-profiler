@@ -37,3 +37,4 @@ docker-compose.override.yml
 *.tmp
 *.log
 /wallet-profiler-improvements.txt
+/docs/New Text Document.txt

@@ -8,12 +8,14 @@ public class NftService
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _config;
     private readonly ILogger<NftService> _logger;
+    private readonly ProfileCacheService _cache;
 
-    public NftService(HttpClient httpClient, IConfiguration config, ILogger<NftService> logger)
+    public NftService(HttpClient httpClient, IConfiguration config, ILogger<NftService> logger, ProfileCacheService cache)
     {
         _httpClient = httpClient;
         _config = config;
         _logger = logger;
+        _cache = cache;
     }
 
     /// <summary>
@@ -47,29 +49,41 @@ public class NftService
                 .Take(10)
                 .ToList();
 
-            // Fetch floor prices for top collections in parallel (max 5 concurrent)
-            var semaphore = new SemaphoreSlim(5);
+            // Fetch floor prices for top collections in parallel (max 10 concurrent), with 1h cache
+            var semaphore = new SemaphoreSlim(10);
             var collectionTasks = collections.Select(async c =>
             {
-                await semaphore.WaitAsync();
-                try
+                decimal? floorPrice;
+
+                // Check cache first
+                if (_cache.TryGetNftFloorPrice(c.ContractAddress, out var cachedPrice))
                 {
-                    var floorPrice = await GetFloorPriceAsync(nftBaseUrl, c.ContractAddress);
-                    return new NftCollection
+                    floorPrice = cachedPrice;
+                }
+                else
+                {
+                    await semaphore.WaitAsync();
+                    try
                     {
-                        Name = c.Name,
-                        ContractAddress = c.ContractAddress,
-                        OwnedCount = c.Count,
-                        FloorPriceEth = floorPrice,
-                        FloorPriceUsd = floorPrice.HasValue && ethPriceUsd.HasValue
-                            ? floorPrice.Value * ethPriceUsd.Value
-                            : null
-                    };
+                        floorPrice = await GetFloorPriceAsync(nftBaseUrl, c.ContractAddress);
+                        _cache.SetNftFloorPrice(c.ContractAddress, floorPrice);
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
                 }
-                finally
+
+                return new NftCollection
                 {
-                    semaphore.Release();
-                }
+                    Name = c.Name,
+                    ContractAddress = c.ContractAddress,
+                    OwnedCount = c.Count,
+                    FloorPriceEth = floorPrice,
+                    FloorPriceUsd = floorPrice.HasValue && ethPriceUsd.HasValue
+                        ? floorPrice.Value * ethPriceUsd.Value
+                        : null
+                };
             });
 
             var topCollections = (await Task.WhenAll(collectionTasks)).ToList();

@@ -137,7 +137,7 @@ public class VirtualsIntelService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to fetch Virtuals ecosystem data");
-            report.Error = ex.Message;
+            report.Error = "Failed to fetch ecosystem data. Please try again later.";
         }
 
         return report;

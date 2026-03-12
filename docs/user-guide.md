@@ -1,4 +1,4 @@
-# Wallet Profiler v2.9 — User Guide
+# Wallet Profiler v3.0 — User Guide
 
 ## Overview
 
@@ -31,7 +31,7 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 | Wallet tags | Yes | Yes | Yes |
 | USD prices for tokens | — | Yes | Yes |
 | Total portfolio value | — | Yes | Yes |
-| DeFi positions (Aave, Compound) | — | Yes | Yes |
+| DeFi positions (9 protocols) | — | Yes | Yes |
 | Transaction activity history | — | Yes | Yes |
 | Portfolio quality score | — | Yes | Yes |
 | ACP trust score | — | Yes | Yes |
@@ -380,16 +380,19 @@ Available on standard and premium tiers. Evaluates portfolio composition:
 
 ### ACP Trust Score
 
-Available on standard and premium tiers. Evaluates counterparty trustworthiness for agent-to-agent commerce:
+Available on standard and premium tiers. Evaluates counterparty trustworthiness for agent-to-agent commerce using 9 positive and 5 negative factors:
 
 | Score Range | Level | Meaning |
 |---|---|---|
 | 80–100 | High | Highly trustworthy — established, well-funded wallet |
-| 60–79 | Moderate | Generally trustworthy — some history and assets |
-| 30–59 | Low | Exercise caution — limited history or assets |
-| 0–29 | Untrusted | Insufficient trust signals — new or empty wallet |
+| 60–79 | Good | Generally trustworthy — solid history and assets |
+| 40–59 | Moderate | Some trust signals present — exercise caution |
+| 20–39 | Low | Limited trust signals — limited history or assets |
+| 0–19 | Untrusted | Insufficient trust signals — new, empty, or flagged wallet |
 
-Trust factors include: wallet age, ETH balance, transaction depth, ENS ownership, DeFi participation, portfolio quality, and interaction diversity.
+**Positive factors:** wallet age, ETH balance, transaction depth, ENS ownership, DeFi participation, portfolio quality, interaction diversity, NFT holdings, transfer history depth.
+
+**Negative factors:** sanctioned address/interactions, risky token approvals, MEV exposure, critical risk level, dormancy.
 
 ### Token Approval Risk Scan
 
@@ -403,21 +406,25 @@ Available on standard and premium tiers. Checks ERC-20 `allowance()` on top 10 n
 | `riskLevel` | Overall risk: `safe`, `low`, `caution`, or `danger` |
 | `approvals[]` | Individual approval details (token, spender, label, risk) |
 
-**Checked spenders:** Uniswap V2/V3, SushiSwap, 1inch, 0x Exchange, OpenSea Seaport.
+**Checked spenders:** Uniswap V2/V3/Universal Router/Permit2, SushiSwap, 1inch V6, 0x Exchange, CoW Protocol, Balancer V2, OpenSea Seaport.
 
 ### Contract Interaction Labels
 
-Available on standard and premium tiers. Labels the wallet's top 10 most-interacted-with addresses using a database of 45+ known Ethereum contracts:
+Available on standard and premium tiers. Labels the wallet's top 10 most-interacted-with addresses using a database of 130+ known Ethereum contracts:
 
 | Category | Examples |
 |---|---|
-| `dex` | Uniswap, SushiSwap, 1inch, Curve |
-| `nft` | OpenSea, Blur, LooksRare |
-| `lending` | Aave V2/V3, Compound |
-| `bridge` | Wormhole, Stargate, Arbitrum, Optimism |
-| `staking` | Lido, Coinbase cbETH, Rocket Pool |
+| `dex` | Uniswap V2/V3/Permit2, SushiSwap, 1inch V6, Curve, Balancer V2, ParaSwap V6, CoW Protocol |
+| `nft` | OpenSea Seaport 1.6, Blur Pool/Blend, LooksRare V2, Sudoswap |
+| `lending` | Aave V2/V3, Compound V2/V3, Prisma mkUSD |
+| `bridge` | Across V2, Hop, LayerZero, CCIP Router, Base Portal, Polygon zkEVM |
+| `staking` | Lido stETH/wstETH, EtherFi eETH/weETH, Rocket Pool, Mantle mETH, Renzo ezETH, Swell rswETH, Kelp rsETH, Frax sfrxETH |
+| `restaking` | EigenLayer Strategy Manager, Delegation Manager, stETH/cbETH/rETH strategies |
+| `yield` | Ethena USDe/sUSDe, MakerDAO sDAI/DSR, Convex, Aura, Yearn |
+| `exchange` | Binance (3 hot wallets), Coinbase (4 wallets), Kraken, Gemini |
 | `mixer` | Tornado Cash (flagged as security concern) |
-| `governance` | UNI, AAVE, MKR, ENS |
+| `governance` | ENS Governor, Uniswap Governor, Aave Governor V2, MakerDAO, Gitcoin Grants, Nouns DAO |
+| `token` | LINK, SNX, LDO, ARB, OP, RPL, PEPE, SHIB, ONDO, EIGEN, ENA, WLD, FET |
 | `identity` | ENS Registrar |
 
 Unlabeled addresses show `label: null` — these are typically personal wallets or unlisted contracts.
@@ -435,9 +442,9 @@ Available on standard and premium tiers. Fetches NFT holdings via Alchemy NFT AP
 | `nfts.topCollections[]` | Top 10 collections by floor price/count |
 | `nfts.topCollections[].floorPriceEth` | Current floor price in ETH |
 
-### Token Transfer History (v1.4)
+### Token Transfer History (v1.4, enhanced v3.0)
 
-Available on standard and premium tiers. Fetches up to 200 recent ERC-20 transfers and provides flow analysis.
+Available on standard and premium tiers. Fetches both ERC-20 token transfers and native ETH/MATIC/AVAX/BNB transfers in parallel, merged into a unified timeline.
 
 | Field | Description |
 |---|---|
@@ -445,30 +452,34 @@ Available on standard and premium tiers. Fetches up to 200 recent ERC-20 transfe
 | `transferHistory.inboundCount` | Number of incoming transfers |
 | `transferHistory.outboundCount` | Number of outgoing transfers |
 | `transferHistory.netFlowUsd` | Net USD flow (positive = inflow) |
-| `transferHistory.recentTransfers[]` | Last 20 transfers with details |
+| `transferHistory.recentTransfers[]` | Last 25 transfers with details (ERC-20 + native) |
 | `transferHistory.timeline[]` | Monthly breakdown (up to 12 months) |
 
-### Similar Wallet Clustering (v1.4)
+### Similar Wallet Clustering (v1.4, enhanced v3.0)
 
-Available on standard and premium tiers. Finds wallets with similar token holdings by analyzing counterparty relationships.
+Available on standard and premium tiers. Finds wallets with similar token holdings, DeFi protocol usage, and interaction patterns by analyzing top 15 counterparties.
 
 | Field | Description |
 |---|---|
 | `similarWallets.candidatesAnalyzed` | Number of counterparties analyzed |
 | `similarWallets.matches[]` | Top 5 similar wallets |
-| `similarWallets.matches[].similarityScore` | Jaccard similarity (0-100) |
-| `similarWallets.matches[].commonTokens` | Shared token symbols |
+| `similarWallets.matches[].similarityScore` | Combined similarity score (0-100): Jaccard token overlap + interaction frequency + shared DeFi protocols |
+| `similarWallets.matches[].commonTokens` | Shared token symbols (up to 8) |
+| `similarWallets.matches[].commonInteractions` | Shared DeFi protocol labels |
+| `similarWallets.matches[].sharedProtocols` | Count of shared DeFi protocols |
 
-### Revoke Recommendation Engine (v1.4)
+### Revoke Recommendation Engine (v1.4, enhanced v3.0)
 
-Available on standard and premium tiers. Analyzes token approvals and recommends which to revoke.
+Available on standard and premium tiers. Analyzes token approvals against 18 known exploited/deprecated contracts and recommends which to revoke.
 
 | Field | Description |
 |---|---|
 | `revokeAdvice.totalRecommendations` | Number of revocation recommendations |
-| `revokeAdvice.highPriority` | Count of high-priority revocations |
-| `revokeAdvice.overallUrgency` | `none`, `low`, `medium`, or `high` |
-| `revokeAdvice.recommendations[]` | Individual recommendations with priority and reason |
+| `revokeAdvice.highPriority` | Count of critical + high-priority revocations |
+| `revokeAdvice.overallUrgency` | `none`, `low`, `medium`, `high`, or `critical` |
+| `revokeAdvice.recommendations[]` | Individual recommendations with priority (`critical`, `high`, `medium`, `low`) and reason |
+
+**Critical priority** is assigned to approvals on known exploited contracts (Multichain, Euler, Ronin Bridge, Wormhole, Nomad, BadgerDAO, etc.).
 
 ### OFAC Sanctions Screening (v1.6)
 
@@ -492,11 +503,23 @@ Available on standard and premium tiers. Analyzes trading patterns and classifie
 | `smartMoney.recentTrades` | Last 10 trades with token, action, amount |
 | `smartMoney.estimatedPnlPct` | Estimated profit/loss percentage |
 
-### Token Holder Analysis (v1.6)
+### Gas Spend Analysis (v3.0)
+
+**Endpoint:** `GET /gas/{address}?chain=ethereum`
+
+Analyzes gas spending for a wallet.
+
+```bash
+curl "http://localhost:5000/gas/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+```
+
+Returns total gas spent in ETH, average gas price, transaction count breakdown, and spending patterns.
+
+### Token Holder Analysis (v1.6, enhanced v3.0)
 
 **Endpoint:** `GET /token/{contract}/holders?chain=ethereum&limit=20`
 
-Analyzes top holders of any ERC-20 token with trust scoring.
+Analyzes top holders of any ERC-20 token with trust scoring and classification.
 
 ```bash
 curl "http://localhost:5000/token/0xdac17f958d2ee523a2206206994597c13d831ec7/holders?limit=5"
@@ -508,7 +531,8 @@ curl "http://localhost:5000/token/0xdac17f958d2ee523a2206206994597c13d831ec7/hol
 | `holdersAnalyzed` | Number of holders profiled |
 | `topHolderConcentration` | % of supply held by top 10 holders |
 | `holders[].trustScore` | Trust score for each holder (0-100) |
-| `holders[].tags` | Tags like `active-trader`, `well-funded`, `ens-holder` |
+| `holders[].tags` | Tags: `power-user`, `active-trader`, `whale`, `well-funded`, `ens-holder`, `major-holder`, `significant-holder`, `exchange`, `dust-holder`, `known:{category}` |
+| `holders[].ensName` | ENS name or known contract label |
 
 ### Portfolio History (v1.6)
 
@@ -821,7 +845,8 @@ acp wallet balance           # check earnings
 - Summary is only included with the `premium` tier
 
 **DeFi positions empty:**
-- Only Aave V3 and Compound V3 are checked
+- 9 protocols are checked: Aave V3, Compound V3, Lido (stETH/wstETH), Rocket Pool (rETH), Coinbase (cbETH), EtherFi (weETH), Frax (sfrxETH), MakerDAO (sDAI), EigenLayer (restaking), Ethena (sUSDe)
+- Currently Ethereum-only (except Aave V3 which works cross-chain)
 
 **Portfolio quality / ACP trust / approval risk is null:**
 - These are only included with `standard` and `premium` tiers

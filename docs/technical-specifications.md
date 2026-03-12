@@ -1,4 +1,4 @@
-# Wallet Profiler v2.9 — Technical Specifications
+# Wallet Profiler v3.0 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -38,7 +38,7 @@ wallet-profiler/
 │           ├── EthereumService.cs        # Nethereum RPC + ENS (cached)
 │           ├── TokenService.cs           # Alchemy getTokenBalances + spam detection
 │           ├── PriceService.cs           # DeFi Llama USD pricing (cached)
-│           ├── DeFiService.cs            # Aave V3 + Compound V3
+│           ├── DeFiService.cs            # 9-protocol DeFi scanner
 │           ├── ActivityService.cs        # Transaction history analysis
 │           ├── RiskScoringService.cs     # Heuristic risk scoring
 │           ├── WalletTaggingService.cs   # Wallet classification tags
@@ -274,6 +274,19 @@ Lists all supported chains with chain IDs and native token symbols.
 
 **Response:** `200 OK` — Array of chain objects.
 
+### GET /gas/{address} (v3.0)
+
+Returns gas spending analysis for a wallet.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `address` | string (path) | Yes | — | Wallet address |
+| `chain` | string (query) | No | `"ethereum"` | Chain to query |
+
+**Response:** `200 OK` — Gas spending summary JSON with total gas spent, average gas price, and transaction breakdown.
+
+**Response time:** ~3s.
+
 ### GET /token/{contract}/holders (v1.6)
 
 Analyzes top holders of an ERC-20 token with trust scoring.
@@ -360,7 +373,7 @@ interface TokenBalance {
 
 interface DeFiPosition {
   protocol: string;
-  type: string;              // "lending" | "borrowing"
+  type: string;              // "lending" | "borrowing" | "staking" | "restaking" | "savings" | "yield"
   asset: string;
   amount: number;
 }
@@ -777,9 +790,22 @@ Summary includes: wallet classification, age, total value, top 3 assets breakdow
 
 ### 5.5 DeFiService
 
-**Aave V3:** `getUserAccountData(address)` → totalCollateralBase, totalDebtBase (USD, 8 decimals)
+Scans 9 DeFi protocols in parallel via `Task.WhenAll`. All use Nethereum contract query handlers.
 
-**Compound V3:** `balanceOf(address)` on cUSDC contract → USDC balance (6 decimals)
+| Protocol | Method | Asset(s) | Type |
+|---|---|---|---|
+| Aave V3 | `getUserAccountData(address)` | USD aggregate (8 decimals) | lending/borrowing |
+| Compound V3 | `balanceOf(address)` on cUSDC | USDC (6 decimals) | lending |
+| Lido | `balanceOf(address)` | stETH, wstETH | staking |
+| Rocket Pool | `balanceOf(address)` | rETH | staking |
+| Coinbase | `balanceOf(address)` | cbETH | staking |
+| EtherFi | `balanceOf(address)` | weETH | staking |
+| Frax | `balanceOf(address)` | sfrxETH | staking |
+| MakerDAO | `balanceOf(address)` | sDAI | savings |
+| EigenLayer | `shares(address)` on strategies | stETH/cbETH/rETH (restaked) | restaking |
+| Ethena | `balanceOf(address)` | sUSDe | yield |
+
+**Dust thresholds:** 0.001 ETH for staking positions, 0.01 for savings/yield positions.
 
 ### 5.6 RiskScoringService
 
@@ -840,7 +866,9 @@ Evaluates portfolio composition quality on a 0–100 scale:
 
 ### 5.9 AcpTrustService
 
-Pre-transaction trust evaluation for agent-to-agent commerce. Scores 0–100:
+Pre-transaction trust evaluation for agent-to-agent commerce. Scores 0–100 with 9 positive and 5 negative factors:
+
+**Positive Factors:**
 
 | Factor | Max Points | Criteria |
 |---|---|---|
@@ -851,8 +879,21 @@ Pre-transaction trust evaluation for agent-to-agent commerce. Scores 0–100:
 | DeFi participation | 10 | Multi-protocol = 10, single = 7 |
 | Portfolio quality | 10 | Score 60+ = 10, 40+ = 5 |
 | Interaction diversity | 10 | 50+ = 10, 20+ = 5 |
+| NFT holdings | 5 | Collection count > 0 |
+| Transfer history depth | 5 | 50+ transfers = 5, 20+ = 3 |
 
-**Levels:** high (80+), moderate (60+), low (30+), untrusted (<30)
+**Negative Factors:**
+
+| Factor | Penalty | Trigger |
+|---|---|---|
+| Sanctioned address | -30 | Wallet on OFAC list |
+| Sanctioned interactions | -15 | Counterparties on OFAC list |
+| Risky approvals | -15 | >3 high-risk approvals |
+| MEV exposure | -10 | >5 sandwich attacks |
+| Critical risk level | -10 | Risk scored as critical |
+| Dormancy | -10 | No transactions found |
+
+**Levels:** high (80+), good (60+), moderate (40+), low (20+), untrusted (<20)
 
 ### 5.10 ApprovalScannerService
 
@@ -874,9 +915,11 @@ Checks ERC-20 `allowance(owner, spender)` on the top 10 non-spam tokens against 
 
 ### 5.11 ContractLabelService
 
-Static dictionary of 45+ known Ethereum mainnet contracts with labels and categories. Used to enrich top counterparty addresses from ActivityService.
+Static dictionary of 130+ known Ethereum mainnet contracts with labels and categories. Used to enrich top counterparty addresses from ActivityService.
 
-**Categories:** `dex`, `nft`, `lending`, `bridge`, `staking`, `mixer`, `token`, `governance`, `identity`, `system`.
+**Categories:** `dex`, `nft`, `lending`, `bridge`, `staking`, `mixer`, `token`, `governance`, `identity`, `system`, `exchange`.
+
+**Coverage includes:** Uniswap (V2/V3/Universal/Permit2), SushiSwap, 1inch V6, Curve (stETH/ETH, crvUSD), Balancer V2, ParaSwap V6, CoW Protocol, OpenSea Seaport 1.6, Blur, LooksRare V2, Sudoswap, Aave V2/V3, Compound V2/V3, Lido (stETH/wstETH), EtherFi (eETH/weETH), Mantle mETH, Renzo ezETH, Swell rswETH, Kelp rsETH, EigenLayer (Strategy Manager, Delegation Manager, strategies), Ethena (USDe/sUSDe), MakerDAO (sDAI/DSR/Pot), Convex, Aura, Yearn, Prisma, Across V2, Hop, LayerZero, CCIP, Base Portal, Binance/Coinbase/Kraken/Gemini hot wallets, ENS/Uniswap/Aave/MakerDAO governance, and 15+ major ERC-20 tokens.
 
 ### 5.12 NftService (v1.3)
 
@@ -906,39 +949,48 @@ Extracts the profile-building logic from Program.cs into a reusable service. Use
 
 **Concurrency:** Up to 10 subscriptions checked in parallel per poll cycle.
 
-### 5.15 TransferHistoryService (v1.4)
+### 5.15 TransferHistoryService (v1.4, enhanced v3.0)
 
-Fetches ERC-20 token transfer events from Etherscan V2 (`action=tokentx`) and builds a transfer timeline with flow analysis.
+Fetches both ERC-20 token transfers (`action=tokentx`) and native ETH transfers (`action=txlist`) from Etherscan V2 in parallel, merging into a unified timeline.
 
-**Data fetched:** Last 200 token transfers sorted descending.
+**Data fetched:** Last 200 token transfers + 200 native transfers sorted descending, merged and deduplicated.
+
+**Native ETH transfers:** Uses `TokenAddress = "native"` and chain-specific symbol (ETH, MATIC, AVAX, BNB). Skips failed transactions (`isError == "1"`) and zero-value contract calls.
 
 **Analysis:**
 - Groups transfers into monthly periods (last 12 months)
 - Classifies each transfer as inbound or outbound
 - Calculates net USD flow when token prices are available
-- Returns 20 most recent transfers with full details
+- Returns 25 most recent transfers with full details
 
-### 5.16 WalletClusteringService (v1.4)
+### 5.16 WalletClusteringService (v1.4, enhanced v3.0)
 
-Finds wallets with similar on-chain behavior by analyzing the wallet's top counterparties.
+Finds wallets with similar on-chain behavior by analyzing the wallet's top counterparties, shared DeFi protocol usage, and token overlap.
 
 **Algorithm:**
-1. Filter top counterparties — exclude known contracts (DEXes, bridges, etc.)
+1. Filter top 15 counterparties — exclude known contracts (DEXes, bridges, etc.)
 2. Fetch token balances for each candidate (basic tier, max 5 parallel)
-3. Compute Jaccard similarity coefficient on token sets
-4. Add interaction frequency bonus (0-20 points)
-5. Return top 5 matches with similarity > 5%
+3. Compute Jaccard similarity coefficient on token sets (×60 weight)
+4. Add interaction frequency bonus (0-25 points based on tx count)
+5. Add shared DeFi protocol bonus (5 pts each, max 15)
+6. Detect shared DeFi tokens via `IsDefiToken()` (25 known DeFi token symbols)
+7. Return top 5 matches with similarity > 5%, up to 8 common tokens per match
 
-### 5.17 RevokeRecommendationService (v1.4)
+### 5.17 RevokeRecommendationService (v1.4, enhanced v3.0)
 
 Analyzes token approvals from ApprovalScannerService and generates prioritized revocation recommendations.
 
+**Known exploited/deprecated contracts (18):** Multichain ($130M, Jul 2023), Euler Finance ($197M, Mar 2023), Ronin Bridge ($625M, Mar 2022), Wormhole ($326M, Feb 2022), Nomad Bridge ($190M, Aug 2022), BadgerDAO ($120M, Dec 2021), Cream Finance, Pickle Finance, Harvest Finance, BZx, PolyNetwork, Wintermute, plus deprecated contracts (Uniswap V1, SushiSwap MasterChef V1, OpenSea Wyvern).
+
+**Trusted protocols (bypass high-risk):** Aave V3/V2, Compound V3, Lido stETH/wstETH, EigenLayer, MakerDAO sDAI.
+
 **Priority levels:**
-- **High:** Unlimited approval to NFT marketplace (common phishing vector), unlimited to unknown spender, or flagged high-risk contract
+- **Critical:** Approval to a known exploited contract
+- **High:** Unlimited approval to NFT marketplace, mixer, unknown spender, or flagged high-risk contract
 - **Medium:** Unlimited approval to trusted DEX router (unnecessary for most users)
 - **Low:** Limited approval to known protocol (safe but reclaimable)
 
-**Overall urgency:** Based on count of high-priority recommendations.
+**Overall urgency:** Based on count of critical/high-priority recommendations.
 
 ### 5.18 ApiKeyAuthService (v1.5)
 
@@ -1132,7 +1184,7 @@ Analyzes wallet trading patterns using 6 weighted factors:
 | > 40 | any | `active_trader` |
 | other | any | `retail` |
 
-### 5.24 TokenHolderService (v1.6)
+### 5.24 TokenHolderService (v1.6, enhanced v3.0)
 
 Analyzes top holders of ERC-20 tokens by processing recent transfer events from Etherscan V2.
 
@@ -1140,16 +1192,29 @@ Analyzes top holders of ERC-20 tokens by processing recent transfer events from 
 1. Fetch last 500 token transfer events via Etherscan V2 `tokentx`
 2. Aggregate net balances per address (inflows - outflows)
 3. Filter to positive balances, sort descending
-4. Profile each holder: ETH balance, tx count, ENS, trust score
+4. Profile each holder: ETH balance, tx count, ENS, trust score, known contract label
 5. Calculate top-10 holder concentration percentage
 
-**Trust scoring per holder:** Active trader (100+ txs) = +30, well-funded (10+ ETH) = +25, ENS holder = +20.
+**Trust scoring per holder:**
 
-### 5.25 SnapshotService (v1.6)
+| Signal | Points | Criteria |
+|---|---|---|
+| Power user | +30 | 500+ transactions |
+| Active trader | +20 | 100+ transactions |
+| Whale | +25 | 100+ ETH balance |
+| Well-funded | +20 | 10+ ETH balance |
+| ENS holder | +15 | Has ENS name |
+| Known entity | +10 | Recognized by ContractLabelService |
 
-In-memory portfolio snapshot storage using `ConcurrentDictionary`.
+**Holder tags:** `power-user`, `active-trader`, `whale`, `well-funded`, `ens-holder`, `major-holder` (>10% supply), `significant-holder` (>5% supply), `exchange`, `dust-holder`, `known:{category}`.
 
-**Recording:** Snapshots are automatically recorded when standard/premium profiles are built. Deduplicates by requiring 1-hour minimum between snapshots for the same address. Caps at 100 snapshots per address.
+### 5.25 SnapshotService (v1.6, enhanced v3.0)
+
+Dual-storage portfolio snapshot system with Redis persistence and in-memory fallback.
+
+**Storage:** Primary Redis via `IDistributedCache` (key: `snapshots:{address}`, TTL: 90 days). Falls back to in-memory `ConcurrentDictionary` when Redis is unavailable.
+
+**Recording:** Snapshots are automatically recorded when standard/premium profiles are built. Deduplicates by requiring 1-hour minimum between snapshots for the same address. Caps at 200 snapshots per address.
 
 **Snapshot data:** Address, total value USD, ETH balance, non-spam token count, transaction count, timestamp.
 

@@ -10,12 +10,14 @@ public class TokenService
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _config;
     private readonly ILogger<TokenService> _logger;
+    private readonly ProfileCacheService _cache;
 
-    public TokenService(HttpClient httpClient, IConfiguration config, ILogger<TokenService> logger)
+    public TokenService(HttpClient httpClient, IConfiguration config, ILogger<TokenService> logger, ProfileCacheService cache)
     {
         _httpClient = httpClient;
         _config = config;
         _logger = logger;
+        _cache = cache;
     }
 
     /// <summary>
@@ -45,10 +47,19 @@ public class TokenService
             var tokensToResolve = tokenBalances.Take(metadataCap).ToList();
             var remainingTokens = tokenBalances.Skip(metadataCap).ToList();
 
-            // Step 3: Get metadata with concurrency limit (max 10 parallel)
-            var semaphore = new SemaphoreSlim(10);
+            // Step 3: Get metadata with concurrency limit (max 20 parallel), with 24h cache
+            var semaphore = new SemaphoreSlim(20);
             var metadataTasks = tokensToResolve.Select(async tb =>
             {
+                // Check cache first
+                if (_cache.TryGetTokenMetadata(tb.ContractAddress, out var cached))
+                {
+                    tb.Symbol = cached.Symbol ?? "UNKNOWN";
+                    tb.Decimals = cached.Decimals;
+                    tb.Balance = ConvertBalance(tb.RawBalanceHex, cached.Decimals);
+                    return;
+                }
+
                 await semaphore.WaitAsync();
                 try
                 {
@@ -58,6 +69,7 @@ public class TokenService
                         tb.Symbol = metadata.Symbol ?? "UNKNOWN";
                         tb.Decimals = metadata.Decimals;
                         tb.Balance = ConvertBalance(tb.RawBalanceHex, metadata.Decimals);
+                        _cache.SetTokenMetadata(tb.ContractAddress, metadata.Symbol, metadata.Decimals);
                     }
                 }
                 finally

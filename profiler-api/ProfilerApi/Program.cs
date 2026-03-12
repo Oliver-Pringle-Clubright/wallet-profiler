@@ -1,3 +1,5 @@
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using ProfilerApi.Models;
 using ProfilerApi.Services;
@@ -72,9 +74,11 @@ var app = builder.Build();
 
 app.UseCors();
 
-// --- Address validation helper ---
+// --- Validation helpers ---
 static bool IsValidEvmAddress(string addr) =>
     addr.Length == 42 && addr.StartsWith("0x") && Regex.IsMatch(addr, @"^0x[a-fA-F0-9]{40}$");
+
+var validChains = new HashSet<string>(ChainConfig.AllChains, StringComparer.OrdinalIgnoreCase);
 
 // --- Security headers middleware ---
 app.Use(async (context, next) =>
@@ -84,10 +88,20 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// --- Warn if auth is disabled ---
+{
+    var authCheck = app.Services.GetRequiredService<ApiKeyAuthService>();
+    if (!authCheck.IsEnabled)
+    {
+        var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
+        startupLogger.LogWarning("⚠ API key authentication is DISABLED — no keys configured. All endpoints are open.");
+    }
+}
+
 // --- API Key Authentication Middleware (v1.5) ---
 app.Use(async (context, next) =>
 {
-    var path = context.Request.Path.Value ?? "";
+    var path = (context.Request.Path.Value ?? "").TrimEnd('/').ToLowerInvariant();
 
     // Skip auth for health, tiers, and SLA endpoints
     if (path is "/health" or "/tiers" or "/sla")
@@ -103,7 +117,9 @@ app.Use(async (context, next) =>
         return;
     }
 
-    var apiKey = context.Request.Headers["X-API-Key"].FirstOrDefault();
+    // Case-insensitive header lookup
+    var apiKey = context.Request.Headers["X-API-Key"].FirstOrDefault()
+              ?? context.Request.Headers["x-api-key"].FirstOrDefault();
     var (isValid, error, _) = authService.ValidateAndCheckRate(apiKey);
 
     if (!isValid)
@@ -133,6 +149,9 @@ app.MapPost("/profile", async (
 
     if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
         return Results.BadRequest(new { error = "Invalid address format" });
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
 
     if (tier is not ("free" or "basic" or "standard" or "premium"))
         return Results.BadRequest(new { error = "Tier must be one of: free, basic, standard, premium" });
@@ -177,8 +196,18 @@ app.MapPost("/profile/batch", async (
     var chain = request.Chain.ToLowerInvariant();
     var tier = request.Tier.ToLowerInvariant();
 
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
     if (tier is not ("free" or "basic" or "standard" or "premium"))
         return Results.BadRequest(new { error = "Tier must be one of: free, basic, standard, premium" });
+
+    // Validate individual addresses
+    var invalidAddresses = request.Addresses
+        .Where(a => { var t = a.Trim(); return t.Length > 255 || (!IsValidEvmAddress(t) && !t.EndsWith(".eth")); })
+        .ToList();
+    if (invalidAddresses.Count > 0)
+        return Results.BadRequest(new { error = $"Invalid address format: {invalidAddresses.First().Trim()}" });
 
     using var tracker = sla.Track("profile_batch");
     var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -241,6 +270,10 @@ app.MapPost("/profile/multi-chain", async (
 
     if (request.Chains.Count > 5)
         return Results.BadRequest(new { error = "Maximum 5 chains per request" });
+
+    var invalidChains = request.Chains.Where(c => !validChains.Contains(c.ToLowerInvariant())).ToList();
+    if (invalidChains.Count > 0)
+        return Results.BadRequest(new { error = $"Unsupported chain: {invalidChains.First()}. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
 
     using var tracker = sla.Track("profile_multi_chain");
     try
@@ -315,7 +348,10 @@ app.MapGet("/trust/{address}", async (
 {
     using var tracker = sla.Track("trust");
     address = address.Trim();
-    var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
 
     if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth") && !SolanaService.IsValidSolanaAddress(address)))
         return Results.BadRequest(new { error = "Invalid address format" });
@@ -487,10 +523,13 @@ app.MapGet("/token/{contract}/holders", async (
     HttpContext httpContext) =>
 {
     using var tracker = sla.Track("token_holders");
-    var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
-    var tier = httpContext.Request.Query["tier"].FirstOrDefault() ?? "standard";
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    var tier = (httpContext.Request.Query["tier"].FirstOrDefault() ?? "standard").ToLowerInvariant();
     var limitStr = httpContext.Request.Query["limit"].FirstOrDefault();
-    var limit = int.TryParse(limitStr, out var l) ? l : 20;
+    var limit = int.TryParse(limitStr, out var l) ? Math.Clamp(l, 1, 100) : 20;
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
 
     try
     {
@@ -611,11 +650,15 @@ app.MapPost("/compare", async (
     if (request.Addresses.Count > 10)
         return Results.BadRequest(new { error = "Maximum 10 addresses per comparison" });
 
+    var chain = request.Chain.ToLowerInvariant();
+    var tier = request.Tier.ToLowerInvariant();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
     using var tracker = sla.Track("compare");
     try
     {
-        var chain = request.Chain.ToLowerInvariant();
-        var tier = request.Tier.ToLowerInvariant();
 
         var profiles = new List<WalletProfile>();
         var semaphore = new SemaphoreSlim(5);
@@ -710,8 +753,11 @@ app.MapGet("/risk/{address}", async (
     HttpContext httpContext) =>
 {
     using var tracker = sla.Track("risk_score");
-    var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
     address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
 
     if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
         return Results.BadRequest(new { error = "Invalid address format" });
@@ -762,6 +808,9 @@ app.MapGet("/virtuals/ecosystem", async (
     using var tracker = sla.Track("virtuals_intel");
     var query = httpContext.Request.Query["query"].FirstOrDefault();
 
+    if (query != null && query.Length > 500)
+        return Results.BadRequest(new { error = "Query too long. Maximum 500 characters." });
+
     try
     {
         var report = await virtualsService.GetEcosystemReportAsync(query);
@@ -785,8 +834,11 @@ app.MapGet("/status/{address}", async (
     HttpContext httpContext) =>
 {
     using var tracker = sla.Track("status");
-    var chain = httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum";
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
     address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
 
     if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth") && !SolanaService.IsValidSolanaAddress(address)))
         return Results.BadRequest(new { error = "Invalid address format" });
@@ -857,18 +909,148 @@ app.MapGet("/whales/{chain}/recent", async (
     int? hours,
     decimal? minValue) =>
 {
+    var chainLower = chain.ToLowerInvariant();
+    if (!validChains.Contains(chainLower))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    var clampedHours = Math.Clamp(hours ?? 24, 1, 168);
+    var clampedMinValue = Math.Max(minValue ?? 100_000m, 0m);
+
     using var tracker = sla.Track("whale_alerts");
     try
     {
         var result = await whaleService.GetRecentWhaleTransfersAsync(
-            chain.ToLowerInvariant(),
-            hours ?? 24,
-            minValue ?? 100_000m);
+            chainLower,
+            clampedHours,
+            clampedMinValue);
 
         if (result.Error != null)
             return Results.BadRequest(new { error = result.Error });
 
         return Results.Ok(result);
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
+    }
+});
+
+// --- GET /gas/{address} (v3.0) ---
+app.MapGet("/gas/{address}", async (
+    string address,
+    ActivityService activityService,
+    EthereumService ethService,
+    PriceService priceService,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("gas_analysis");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+        {
+            var web3 = ethService.GetWeb3(chain);
+            address = await ethService.ResolveEnsToAddressAsync(web3, address);
+        }
+
+        // Fetch tx list via Etherscan V2
+        if (!ChainConfig.Chains.TryGetValue(chain, out var chainConfig))
+            return Results.BadRequest(new { error = "Unsupported chain" });
+
+        var apiKey = ethService.GetEtherscanApiKey();
+        if (string.IsNullOrEmpty(apiKey))
+            return Results.BadRequest(new { error = "Etherscan API key not configured" });
+
+        var url = $"{ChainConfig.EtherscanV2BaseUrl}?chainid={chainConfig.ChainId}&module=account&action=txlist&address={address}&startblock=0&endblock=99999999&page=1&offset=1000&sort=desc&apikey={apiKey}";
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var response = await http.GetFromJsonAsync<EtherscanResponse<GasTxDto>>(url);
+
+        if (response?.Result is null || response.Result.Count == 0)
+            return Results.Ok(new { address, chain, totalTransactions = 0, totalGasSpentEth = 0m, message = "No transactions found" });
+
+        var txs = response.Result;
+        var outboundTxs = txs.Where(t => t.From?.Equals(address, StringComparison.OrdinalIgnoreCase) == true).ToList();
+
+        var totalGasWei = outboundTxs.Sum(t =>
+        {
+            if (long.TryParse(t.GasUsed, out var gasUsed) && long.TryParse(t.GasPrice, out var gasPrice))
+                return (decimal)gasUsed * gasPrice;
+            return 0m;
+        });
+        var totalGasEth = totalGasWei / 1_000_000_000_000_000_000m;
+
+        var avgGasPriceGwei = outboundTxs.Count > 0
+            ? outboundTxs.Average(t => long.TryParse(t.GasPrice, out var gp) ? gp / 1_000_000_000.0 : 0)
+            : 0;
+
+        // Monthly breakdown
+        var monthlyGas = outboundTxs
+            .Where(t => long.TryParse(t.TimeStamp, out _))
+            .GroupBy(t => DateTimeOffset.FromUnixTimeSeconds(long.Parse(t.TimeStamp!)).ToString("yyyy-MM"))
+            .OrderByDescending(g => g.Key)
+            .Take(6)
+            .Select(g => new
+            {
+                period = g.Key,
+                txCount = g.Count(),
+                gasSpentEth = g.Sum(t =>
+                {
+                    if (long.TryParse(t.GasUsed, out var gu) && long.TryParse(t.GasPrice, out var gp))
+                        return (decimal)gu * gp / 1_000_000_000_000_000_000m;
+                    return 0m;
+                })
+            })
+            .ToList();
+
+        // Top 5 most expensive transactions
+        var topGasTxs = outboundTxs
+            .Select(t =>
+            {
+                long.TryParse(t.GasUsed, out var gu);
+                long.TryParse(t.GasPrice, out var gp);
+                return new { t.Hash, GasEth = (decimal)gu * gp / 1_000_000_000_000_000_000m, t.To, t.TimeStamp };
+            })
+            .OrderByDescending(t => t.GasEth)
+            .Take(5)
+            .Select(t => new
+            {
+                txHash = t.Hash,
+                gasSpentEth = t.GasEth,
+                to = t.To,
+                timestamp = long.TryParse(t.TimeStamp, out var ts)
+                    ? DateTimeOffset.FromUnixTimeSeconds(ts).UtcDateTime
+                    : (DateTime?)null
+            })
+            .ToList();
+
+        // Get ETH price for USD conversion
+        var (ethPrice, _) = await priceService.GetAllPricesAsync([], chain);
+
+        return Results.Ok(new
+        {
+            address,
+            chain,
+            totalTransactions = txs.Count,
+            outboundTransactions = outboundTxs.Count,
+            totalGasSpentEth = Math.Round(totalGasEth, 8),
+            totalGasSpentUsd = ethPrice.HasValue ? Math.Round(totalGasEth * ethPrice.Value, 2) : (decimal?)null,
+            avgGasPriceGwei = Math.Round(avgGasPriceGwei, 2),
+            ethPriceUsd = ethPrice,
+            monthlyBreakdown = monthlyGas,
+            topGasTransactions = topGasTxs,
+            analyzedAt = DateTime.UtcNow
+        });
     }
     catch (Exception ex)
     {
@@ -921,3 +1103,14 @@ app.MapGet("/tiers", () => Results.Ok(new
 }));
 
 app.Run();
+
+// --- DTOs for gas analysis ---
+internal class GasTxDto
+{
+    [JsonPropertyName("hash")] public string? Hash { get; set; }
+    [JsonPropertyName("from")] public string? From { get; set; }
+    [JsonPropertyName("to")] public string? To { get; set; }
+    [JsonPropertyName("gasUsed")] public string? GasUsed { get; set; }
+    [JsonPropertyName("gasPrice")] public string? GasPrice { get; set; }
+    [JsonPropertyName("timeStamp")] public string? TimeStamp { get; set; }
+}

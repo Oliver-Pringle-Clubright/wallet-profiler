@@ -31,6 +31,8 @@ public class EthereumService
         return chainConfig.RpcUrl.Replace("{API_KEY}", apiKey);
     }
 
+    public string? GetEtherscanApiKey() => _config["Etherscan:ApiKey"];
+
     public async Task<decimal> GetEthBalanceAsync(Web3 web3, string address)
     {
         var balance = await web3.Eth.GetBalance.SendRequestAsync(address);

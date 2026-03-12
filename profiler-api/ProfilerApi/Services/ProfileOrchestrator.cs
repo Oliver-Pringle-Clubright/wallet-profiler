@@ -238,37 +238,37 @@ public class ProfileOrchestrator
             if (topCounterparties != null && topCounterparties.Count > 0)
                 profile.TopInteractions = _labelService.LabelInteractions(topCounterparties);
 
-            profile.ApprovalRisk = await _approvalService.ScanAsync(web3, address, tokens);
-            profile.AcpTrust = _trustService.Evaluate(profile);
+            // Build token prices dictionary (needed by transfer history)
+            var tokenPrices = tokens
+                .Where(t => t.PriceUsd.HasValue && !t.IsSpam)
+                .ToDictionary(t => t.ContractAddress.ToLowerInvariant(), t => t.PriceUsd!.Value);
 
-            // NFT holdings (v1.3)
-            profile.Nfts = await _nftService.GetNftSummaryAsync(rpcUrl, address, ethPrice);
+            // --- Run all async premium features in PARALLEL ---
+            var approvalTask = _approvalService.ScanAsync(web3, address, tokens);
+            var nftTask = _nftService.GetNftSummaryAsync(rpcUrl, address, ethPrice);
+            var transferTask = _transferService.GetTransferHistoryAsync(address, chain, tokenPrices);
+            var clusteringTask = _clusteringService.FindSimilarAsync(
+                address, chain, tier, tokens, profile.TopInteractions, topCounterparties);
+            var mevTask = _mevService.AnalyzeAsync(address, chain);
+
+            await Task.WhenAll(approvalTask, nftTask, transferTask, clusteringTask, mevTask);
+
+            // --- Assign parallel results ---
+            profile.ApprovalRisk = approvalTask.Result;
+            profile.Nfts = nftTask.Result;
+            profile.TransferHistory = transferTask.Result;
+            profile.SimilarWallets = clusteringTask.Result;
+            profile.MevExposure = mevTask.Result;
+
+            // --- Sync features that depend on async results ---
+            profile.AcpTrust = _trustService.Evaluate(profile);
+            profile.RevokeAdvice = _revokeService.Analyze(profile.ApprovalRisk);
+            profile.Sanctions = _sanctionsService.Screen(address, profile.TopInteractions);
+            profile.SmartMoney = _smartMoneyService.Analyze(profile, profile.TransferHistory);
 
             // Add NFT value to total if available
             if (profile.Nfts?.EstimatedValueUsd > 0 && totalValueUsd.HasValue)
                 profile.TotalValueUsd = totalValueUsd.Value + profile.Nfts.EstimatedValueUsd.Value;
-
-            // Token transfer history (v1.4)
-            var tokenPrices = tokens
-                .Where(t => t.PriceUsd.HasValue && !t.IsSpam)
-                .ToDictionary(t => t.ContractAddress.ToLowerInvariant(), t => t.PriceUsd!.Value);
-            profile.TransferHistory = await _transferService.GetTransferHistoryAsync(address, chain, tokenPrices);
-
-            // Similar wallet clustering (v1.4)
-            profile.SimilarWallets = await _clusteringService.FindSimilarAsync(
-                address, chain, tier, tokens, profile.TopInteractions, topCounterparties);
-
-            // Revoke recommendations (v1.4)
-            profile.RevokeAdvice = _revokeService.Analyze(profile.ApprovalRisk);
-
-            // Sanctions screening (v1.6)
-            profile.Sanctions = _sanctionsService.Screen(address, profile.TopInteractions);
-
-            // Smart money analysis (v1.6)
-            profile.SmartMoney = _smartMoneyService.Analyze(profile, profile.TransferHistory);
-
-            // MEV exposure detection (v1.7)
-            profile.MevExposure = await _mevService.AnalyzeAsync(address, chain);
         }
 
         // --- PREMIUM: natural language summary ---

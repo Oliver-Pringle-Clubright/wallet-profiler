@@ -19,7 +19,9 @@ public class ProfileCacheService
     // Cache durations
     private static readonly TimeSpan ProfileTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan EnsTtl = TimeSpan.FromHours(1);
-    private static readonly TimeSpan PriceTtl = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan PriceTtl = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan TokenMetadataTtl = TimeSpan.FromHours(24);
+    private static readonly TimeSpan NftFloorPriceTtl = TimeSpan.FromHours(1);
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -153,6 +155,46 @@ public class ProfileCacheService
     {
         var key = $"prices:{cacheKey}";
         _memCache.Set(key, (ethPrice, tokenPrices), PriceTtl);
+    }
+
+    // --- Token metadata cache (memory only — stable data, 24h TTL) ---
+
+    public bool TryGetTokenMetadata(string contractAddress, out (string? Symbol, int Decimals) metadata)
+    {
+        var key = $"token-meta:{contractAddress.ToLowerInvariant()}";
+        if (_memCache.TryGetValue(key, out (string? Symbol, int Decimals) cached))
+        {
+            metadata = cached;
+            return true;
+        }
+        metadata = default;
+        return false;
+    }
+
+    public void SetTokenMetadata(string contractAddress, string? symbol, int decimals)
+    {
+        var key = $"token-meta:{contractAddress.ToLowerInvariant()}";
+        _memCache.Set(key, (symbol, decimals), TokenMetadataTtl);
+    }
+
+    // --- NFT floor price cache (memory only — 1h TTL) ---
+
+    public bool TryGetNftFloorPrice(string contractAddress, out decimal? floorPrice)
+    {
+        var key = $"nft-floor:{contractAddress.ToLowerInvariant()}";
+        if (_memCache.TryGetValue(key, out decimal? cached))
+        {
+            floorPrice = cached;
+            return true;
+        }
+        floorPrice = null;
+        return false;
+    }
+
+    public void SetNftFloorPrice(string contractAddress, decimal? floorPrice)
+    {
+        var key = $"nft-floor:{contractAddress.ToLowerInvariant()}";
+        _memCache.Set(key, floorPrice, NftFloorPriceTtl);
     }
 
     private static string ProfileKey(string address, string chain, string tier)

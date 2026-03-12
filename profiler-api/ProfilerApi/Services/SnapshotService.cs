@@ -1,32 +1,48 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
+using Microsoft.Extensions.Caching.Distributed;
 using ProfilerApi.Models;
 
 namespace ProfilerApi.Services;
 
 /// <summary>
-/// Stores portfolio snapshots in memory and provides historical data.
-/// Snapshots are taken automatically when profiles are built.
+/// Stores portfolio snapshots with Redis persistence (when available)
+/// and in-memory fallback. Snapshots survive container restarts when Redis is configured.
 /// </summary>
 public class SnapshotService
 {
     private readonly ConcurrentDictionary<string, List<PortfolioSnapshot>> _snapshots = new();
+    private readonly IDistributedCache? _distCache;
     private readonly ILogger<SnapshotService> _logger;
+    private readonly bool _useRedis;
 
-    private const int MaxSnapshotsPerAddress = 100;
+    private const int MaxSnapshotsPerAddress = 200;
+    private static readonly TimeSpan RedisTtl = TimeSpan.FromDays(90);
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
-    public SnapshotService(ILogger<SnapshotService> logger)
+    public SnapshotService(ILogger<SnapshotService> logger, IDistributedCache? distCache = null, IConfiguration? config = null)
     {
         _logger = logger;
+        _distCache = distCache;
+        _useRedis = !string.IsNullOrEmpty(config?["Redis:ConnectionString"]);
+        if (_useRedis)
+            _logger.LogInformation("Snapshot persistence: Redis (90-day TTL)");
+        else
+            _logger.LogInformation("Snapshot persistence: in-memory only");
     }
 
     /// <summary>
     /// Records a snapshot from a completed profile.
     /// Deduplicates by only storing one snapshot per hour per address.
+    /// Persists to Redis when available.
     /// </summary>
     public void RecordSnapshot(WalletProfile profile)
     {
         var key = profile.Address.ToLowerInvariant();
-        var snapshots = _snapshots.GetOrAdd(key, _ => new List<PortfolioSnapshot>());
+        var snapshots = _snapshots.GetOrAdd(key, _ => LoadFromRedis(key));
 
         lock (snapshots)
         {
@@ -51,6 +67,9 @@ public class SnapshotService
             // Cap stored snapshots
             while (snapshots.Count > MaxSnapshotsPerAddress)
                 snapshots.RemoveAt(0);
+
+            // Persist to Redis
+            SaveToRedis(key, snapshots);
         }
     }
 
@@ -60,8 +79,7 @@ public class SnapshotService
     public PortfolioHistory GetHistory(string address, int days = 30)
     {
         var key = address.ToLowerInvariant();
-        if (!_snapshots.TryGetValue(key, out var snapshots))
-            return new PortfolioHistory { Address = address };
+        var snapshots = _snapshots.GetOrAdd(key, _ => LoadFromRedis(key));
 
         List<PortfolioSnapshot> filtered;
         lock (snapshots)
@@ -92,5 +110,50 @@ public class SnapshotService
             ValueChangePct = changePct,
             Snapshots = filtered
         };
+    }
+
+    private List<PortfolioSnapshot> LoadFromRedis(string addressKey)
+    {
+        if (!_useRedis || _distCache == null)
+            return new List<PortfolioSnapshot>();
+
+        try
+        {
+            var json = _distCache.GetString($"snapshots:{addressKey}");
+            if (!string.IsNullOrEmpty(json))
+            {
+                var loaded = JsonSerializer.Deserialize<List<PortfolioSnapshot>>(json, JsonOpts);
+                if (loaded != null)
+                {
+                    _logger.LogDebug("Loaded {Count} snapshots from Redis for {Address}", loaded.Count, addressKey);
+                    return loaded;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load snapshots from Redis for {Address}", addressKey);
+        }
+
+        return new List<PortfolioSnapshot>();
+    }
+
+    private void SaveToRedis(string addressKey, List<PortfolioSnapshot> snapshots)
+    {
+        if (!_useRedis || _distCache == null)
+            return;
+
+        try
+        {
+            var json = JsonSerializer.Serialize(snapshots, JsonOpts);
+            _distCache.SetString($"snapshots:{addressKey}", json, new DistributedCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = RedisTtl
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist snapshots to Redis for {Address}", addressKey);
+        }
     }
 }

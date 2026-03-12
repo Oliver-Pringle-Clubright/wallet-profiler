@@ -7,18 +7,42 @@ namespace ProfilerApi.Services;
 /// Keys are stored in appsettings under "ApiKeys" section.
 /// Each key has a name, tier, and rate limit.
 /// </summary>
-public class ApiKeyAuthService
+public class ApiKeyAuthService : IDisposable
 {
     private readonly IConfiguration _config;
     private readonly ILogger<ApiKeyAuthService> _logger;
     private readonly ConcurrentDictionary<string, ApiKeyInfo> _keys = new();
     private readonly ConcurrentDictionary<string, RateLimitState> _rateLimits = new();
+    private readonly Timer _cleanupTimer;
 
     public ApiKeyAuthService(IConfiguration config, ILogger<ApiKeyAuthService> logger)
     {
         _config = config;
         _logger = logger;
         LoadKeys();
+
+        // Cleanup stale rate limit entries every 5 minutes
+        _cleanupTimer = new Timer(_ => CleanupStaleEntries(), null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+    }
+
+    private void CleanupStaleEntries()
+    {
+        var cutoff = DateTime.UtcNow.AddMinutes(-5);
+        var staleKeys = _rateLimits
+            .Where(kv => { lock (kv.Value) { return kv.Value.Requests.Count == 0 || kv.Value.Requests.Peek() < cutoff; } })
+            .Select(kv => kv.Key)
+            .ToList();
+
+        foreach (var key in staleKeys)
+            _rateLimits.TryRemove(key, out _);
+
+        if (staleKeys.Count > 0)
+            _logger.LogDebug("Cleaned up {Count} stale rate limit entries", staleKeys.Count);
+    }
+
+    public void Dispose()
+    {
+        _cleanupTimer?.Dispose();
     }
 
     private void LoadKeys()

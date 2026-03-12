@@ -4,14 +4,15 @@ using ProfilerApi.Models;
 namespace ProfilerApi.Services;
 
 /// <summary>
-/// Analyzes token holders using Alchemy's getOwnersForToken API.
-/// Profiles top holders with trust scores and tags.
+/// Analyzes token holders by aggregating recent transfer events from Etherscan V2.
+/// Profiles top holders with trust scores, tags, and classification.
 /// </summary>
 public class TokenHolderService
 {
     private readonly HttpClient _httpClient;
     private readonly EthereumService _ethService;
     private readonly TokenService _tokenService;
+    private readonly ContractLabelService _labelService;
     private readonly IConfiguration _config;
     private readonly ILogger<TokenHolderService> _logger;
 
@@ -19,12 +20,14 @@ public class TokenHolderService
         HttpClient httpClient,
         EthereumService ethService,
         TokenService tokenService,
+        ContractLabelService labelService,
         IConfiguration config,
         ILogger<TokenHolderService> logger)
     {
         _httpClient = httpClient;
         _ethService = ethService;
         _tokenService = tokenService;
+        _labelService = labelService;
         _config = config;
         _logger = logger;
     }
@@ -55,21 +58,7 @@ public class TokenHolderService
                 tokenDecimals = metaResult.TryGetProperty("decimals", out var d) ? d.GetInt32() : 18;
             }
 
-            // Get top holders using Alchemy getOwnersForToken
-            var holdersRequest = new
-            {
-                jsonrpc = "2.0",
-                method = "alchemy_getTokenBalances",
-                @params = new object[] { contractAddress, "erc20" },
-                id = 2
-            };
-
-            // Actually use getOwnersForToken endpoint (Alchemy NFT-style API)
-            var nftBaseUrl = rpcUrl.Replace("/v2/", "/nft/v3/");
-            var ownersUrl = $"{nftBaseUrl}/getOwnersForContract?contractAddress={contractAddress}&withTokenBalances=true&limit={limit}";
-
-            // Fallback: since getOwnersForContract is NFT-focused, use a simpler approach
-            // Get the top holders by analyzing recent transfer events
+            // Get top holders from recent transfer events
             var owners = await GetTopHoldersFromTransfersAsync(rpcUrl, contractAddress, chain, limit);
 
             if (owners.Count == 0)
@@ -94,22 +83,48 @@ public class TokenHolderService
 
                     var score = 0;
                     var tags = new List<string>();
-
                     var txCount = txCountTask.Result;
                     var ethBal = balanceTask.Result;
 
-                    if (txCount > 100) { score += 30; tags.Add("active-trader"); }
-                    else if (txCount > 20) score += 15;
-                    if (ethBal > 10) { score += 25; tags.Add("well-funded"); }
+                    // Score components
+                    if (txCount > 500) { score += 30; tags.Add("power-user"); }
+                    else if (txCount > 100) { score += 20; tags.Add("active-trader"); }
+                    else if (txCount > 20) score += 10;
+
+                    if (ethBal > 100) { score += 25; tags.Add("whale"); }
+                    else if (ethBal > 10) { score += 20; tags.Add("well-funded"); }
                     else if (ethBal > 1) score += 15;
-                    if (ensTask.Result != null) { score += 20; tags.Add("ens-holder"); }
+                    else if (ethBal > 0.1m) score += 5;
+
+                    if (ensTask.Result != null) { score += 15; tags.Add("ens-holder"); }
+
+                    // Classify holder based on balance percentage
+                    if (owner.BalancePct.HasValue)
+                    {
+                        if (owner.BalancePct > 10)
+                            tags.Add("major-holder");
+                        else if (owner.BalancePct > 5)
+                            tags.Add("significant-holder");
+                    }
+
+                    // Check if holder is a known contract (exchange, protocol, etc.)
+                    var (label, category) = _labelService.GetLabel(owner.Address);
+                    if (label != null)
+                    {
+                        tags.Add($"known:{category}");
+                        score += 10; // Known entities get a trust bonus
+                    }
+
+                    // Classify holder type
+                    if (category == "exchange") tags.Add("exchange");
+                    else if (txCount < 5 && ethBal < 0.01m) tags.Add("dust-holder");
 
                     score = Math.Clamp(score, 0, 100);
 
                     return new HolderProfile
                     {
                         Address = owner.Address,
-                        EnsName = ensTask.Result,
+                        EnsName = ensTask.Result ?? label,
                         Balance = owner.Balance,
                         BalancePct = owner.BalancePct,
                         TrustScore = score,
@@ -139,6 +154,10 @@ public class TokenHolderService
             var topHolderConcentration = holders.Where(h => h.BalancePct.HasValue)
                 .Take(10)
                 .Sum(h => h.BalancePct!.Value);
+
+            // Count whales and exchanges
+            var whaleCount = holders.Count(h => h.Tags.Contains("whale") || h.Tags.Contains("major-holder"));
+            var exchangeCount = holders.Count(h => h.Tags.Contains("exchange") || h.Tags.Contains("known:exchange"));
 
             return new TokenHolderAnalysis
             {

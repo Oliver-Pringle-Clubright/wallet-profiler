@@ -9,6 +9,8 @@ public class AcpTrustService
         var score = 0;
         var factors = new List<string>();
 
+        // ==================== POSITIVE SIGNALS ====================
+
         // 1. Wallet age (max 25 points)
         if (profile.Activity?.FirstTransaction.HasValue == true)
         {
@@ -85,30 +87,40 @@ public class AcpTrustService
         if (profile.DeFiPositions.Count > 0)
         {
             var protocols = profile.DeFiPositions.Select(p => p.Protocol).Distinct().Count();
-            if (protocols >= 2)
+            if (protocols >= 3)
             {
                 score += 10;
-                factors.Add("Multi-protocol DeFi user (+10)");
+                factors.Add($"Active across {protocols} DeFi protocols (+10)");
+            }
+            else if (protocols >= 2)
+            {
+                score += 8;
+                factors.Add("Multi-protocol DeFi user (+8)");
             }
             else
             {
-                score += 7;
-                factors.Add("DeFi participant (+7)");
+                score += 5;
+                factors.Add("DeFi participant (+5)");
             }
         }
 
         // 6. Portfolio quality (max 10 points)
         if (profile.PortfolioQuality != null)
         {
-            if (profile.PortfolioQuality.QualityScore >= 60)
+            if (profile.PortfolioQuality.QualityScore >= 70)
             {
                 score += 10;
                 factors.Add("High portfolio quality (+10)");
             }
-            else if (profile.PortfolioQuality.QualityScore >= 40)
+            else if (profile.PortfolioQuality.QualityScore >= 50)
             {
-                score += 5;
-                factors.Add("Moderate portfolio quality (+5)");
+                score += 7;
+                factors.Add("Good portfolio quality (+7)");
+            }
+            else if (profile.PortfolioQuality.QualityScore >= 30)
+            {
+                score += 3;
+                factors.Add("Basic portfolio quality (+3)");
             }
         }
 
@@ -120,8 +132,123 @@ public class AcpTrustService
         }
         else if (profile.Activity?.UniqueInteractions > 20)
         {
-            score += 5;
-            factors.Add("Connected wallet 20+ interactions (+5)");
+            score += 7;
+            factors.Add("Connected wallet 20+ interactions (+7)");
+        }
+        else if (profile.Activity?.UniqueInteractions > 5)
+        {
+            score += 3;
+            factors.Add("Some interactions (+3)");
+        }
+
+        // 8. NFT holdings (max 5 points)
+        if (profile.Nfts != null && profile.Nfts.TotalCount > 0)
+        {
+            if (profile.Nfts.EstimatedValueUsd > 1000)
+            {
+                score += 5;
+                factors.Add("Valuable NFT collection (+5)");
+            }
+            else if (profile.Nfts.TotalCount > 5)
+            {
+                score += 3;
+                factors.Add("NFT holder (+3)");
+            }
+        }
+
+        // 9. Transfer history depth (max 5 points)
+        if (profile.TransferHistory != null && profile.TransferHistory.TotalTransfers > 0)
+        {
+            if (profile.TransferHistory.TotalTransfers > 100)
+            {
+                score += 5;
+                factors.Add("Deep transfer history (+5)");
+            }
+            else if (profile.TransferHistory.TotalTransfers > 20)
+            {
+                score += 3;
+                factors.Add("Active transfer history (+3)");
+            }
+        }
+
+        // ==================== NEGATIVE SIGNALS ====================
+
+        // 10. Sanctions exposure (up to -30)
+        if (profile.Sanctions != null)
+        {
+            if (profile.Sanctions.IsSanctioned)
+            {
+                score -= 30;
+                factors.Add("SANCTIONED ADDRESS (-30)");
+            }
+            else if (profile.Sanctions.HasSanctionedInteractions)
+            {
+                score -= 15;
+                factors.Add("Has interactions with sanctioned entities (-15)");
+            }
+        }
+
+        // 11. Risky approvals (up to -15)
+        if (profile.ApprovalRisk != null)
+        {
+            if (profile.ApprovalRisk.HighRiskApprovals > 3)
+            {
+                score -= 15;
+                factors.Add($"{profile.ApprovalRisk.HighRiskApprovals} high-risk approvals (-15)");
+            }
+            else if (profile.ApprovalRisk.HighRiskApprovals > 0)
+            {
+                score -= 7;
+                factors.Add($"{profile.ApprovalRisk.HighRiskApprovals} high-risk approval(s) (-7)");
+            }
+            else if (profile.ApprovalRisk.UnlimitedApprovals > 5)
+            {
+                score -= 5;
+                factors.Add("Many unlimited approvals outstanding (-5)");
+            }
+        }
+
+        // 12. MEV exposure (up to -10)
+        if (profile.MevExposure != null)
+        {
+            if (profile.MevExposure.SandwichAttacks > 5)
+            {
+                score -= 10;
+                factors.Add($"Frequent MEV victim — {profile.MevExposure.SandwichAttacks} sandwich attacks (-10)");
+            }
+            else if (profile.MevExposure.SandwichAttacks > 0)
+            {
+                score -= 3;
+                factors.Add("Some MEV exposure (-3)");
+            }
+        }
+
+        // 13. High risk score penalty (up to -10)
+        if (profile.Risk.Level == "critical")
+        {
+            score -= 10;
+            factors.Add("Critical risk level (-10)");
+        }
+        else if (profile.Risk.Level == "high")
+        {
+            score -= 5;
+            factors.Add("High risk level (-5)");
+        }
+
+        // 14. Empty/dormant wallet penalty
+        if (profile.TransactionCount == 0)
+        {
+            score -= 10;
+            factors.Add("No transaction history (-10)");
+        }
+        else if (profile.Activity?.LastTransaction.HasValue == true)
+        {
+            var daysSinceLast = (DateTime.UtcNow - profile.Activity.LastTransaction.Value).TotalDays;
+            if (daysSinceLast > 365)
+            {
+                score -= 5;
+                factors.Add("Dormant wallet — inactive for 1+ year (-5)");
+            }
         }
 
         // Clamp score
@@ -130,8 +257,9 @@ public class AcpTrustService
         var level = score switch
         {
             >= 80 => "high",
-            >= 60 => "moderate",
-            >= 30 => "low",
+            >= 60 => "good",
+            >= 40 => "moderate",
+            >= 20 => "low",
             _ => "untrusted"
         };
 
