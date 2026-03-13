@@ -44,6 +44,18 @@ public class DeFiService
     // Frax
     private const string FraxSfrxETH = "0xac3E018457B222d93114458476f3E3416Abbe38F";
 
+    // Morpho Blue — MetaMorpho vaults (ERC-4626, standard balanceOf)
+    private const string MorphoGauntletWETH = "0x38989BBA00BDF8181F4082995b3DEAe96163aC5D";
+    private const string MorphoGauntletUSDC = "0x8eB67A509616cd6A7c1B3c8C21D48FF57df3d458";
+    private const string MorphoSteakhouseUSDC = "0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB";
+    private const string MorphoRe7WETH = "0x78Fc2c2eD71dAb0491d268b4e7EFBFe8Abb768C8";
+
+    // Aura Finance
+    private const string AuraBAL = "0x616e8BfA43F920657B3497DBf40D6b1A02D4608d";
+
+    // Pendle — we detect PT/YT tokens from existing token balances (symbol-based)
+    // No additional contract calls needed — handled via token list analysis
+
     public DeFiService(ILogger<DeFiService> logger)
     {
         _logger = logger;
@@ -63,6 +75,8 @@ public class DeFiService
             GetMakerPositionsAsync(web3, address, chain),
             GetEigenLayerPositionsAsync(web3, address, chain),
             GetYieldPositionsAsync(web3, address, chain),
+            GetMorphoPositionsAsync(web3, address, chain),
+            GetAuraPositionsAsync(web3, address, chain),
         };
 
         var results = await Task.WhenAll(tasks);
@@ -363,6 +377,126 @@ public class DeFiService
 
         var results = await Task.WhenAll(tasks);
         positions.AddRange(results.Where(r => r != null)!);
+        return positions;
+    }
+
+    private async Task<List<DeFiPosition>> GetMorphoPositionsAsync(Web3 web3, string address, string chain)
+    {
+        if (chain != "ethereum") return [];
+        var positions = new List<DeFiPosition>();
+
+        var vaults = new (string Contract, string Asset, int Decimals)[]
+        {
+            (MorphoGauntletWETH, "WETH (Gauntlet)", 18),
+            (MorphoGauntletUSDC, "USDC (Gauntlet)", 6),
+            (MorphoSteakhouseUSDC, "USDC (Steakhouse)", 6),
+            (MorphoRe7WETH, "WETH (Re7)", 18),
+        };
+
+        var balanceOfHandler = web3.Eth.GetContractQueryHandler<BalanceOfFunction>();
+        var tasks = vaults.Select(async v =>
+        {
+            try
+            {
+                var balance = await balanceOfHandler.QueryAsync<BigInteger>(
+                    v.Contract, new BalanceOfFunction { Account = address });
+                var amount = Web3.Convert.FromWei(balance, v.Decimals);
+                if (amount > (v.Decimals == 6 ? 0.01m : 0.001m))
+                {
+                    return new DeFiPosition
+                    {
+                        Protocol = "Morpho",
+                        Type = "lending",
+                        Asset = v.Asset,
+                        Amount = amount
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to check Morpho {Asset} for {Address}", v.Asset, address);
+            }
+            return null;
+        });
+
+        var results = await Task.WhenAll(tasks);
+        positions.AddRange(results.Where(r => r != null)!);
+        return positions;
+    }
+
+    private async Task<List<DeFiPosition>> GetAuraPositionsAsync(Web3 web3, string address, string chain)
+    {
+        if (chain != "ethereum") return [];
+
+        try
+        {
+            var balanceOfHandler = web3.Eth.GetContractQueryHandler<BalanceOfFunction>();
+            var balance = await balanceOfHandler.QueryAsync<BigInteger>(
+                AuraBAL, new BalanceOfFunction { Account = address });
+            var amount = Web3.Convert.FromWei(balance);
+
+            if (amount > 0.01m)
+            {
+                return
+                [
+                    new DeFiPosition
+                    {
+                        Protocol = "Aura Finance",
+                        Type = "staking",
+                        Asset = "auraBAL",
+                        Amount = amount
+                    }
+                ];
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to check Aura position for {Address}", address);
+        }
+
+        return [];
+    }
+
+    /// <summary>
+    /// Detects Pendle PT/YT positions from existing token balances.
+    /// Call this after token discovery — no additional RPC calls needed.
+    /// </summary>
+    public List<DeFiPosition> DetectPendlePositions(List<TokenBalance> tokens)
+    {
+        var positions = new List<DeFiPosition>();
+
+        foreach (var token in tokens)
+        {
+            if (token.IsSpam || token.Balance <= 0) continue;
+
+            var sym = token.Symbol.ToUpperInvariant();
+            if (sym.StartsWith("PT-"))
+            {
+                positions.Add(new DeFiPosition
+                {
+                    Protocol = "Pendle",
+                    Type = "yield",
+                    Asset = token.Symbol,
+                    Amount = token.Balance
+                });
+            }
+            else if (sym.StartsWith("YT-"))
+            {
+                positions.Add(new DeFiPosition
+                {
+                    Protocol = "Pendle",
+                    Type = "yield",
+                    Asset = token.Symbol,
+                    Amount = token.Balance
+                });
+            }
+            else if (sym == "PENDLE" && token.Balance > 0.01m)
+            {
+                // Pendle governance token — not a DeFi position per se, but indicates participation
+                // Skip — this is a token holding, not a DeFi position
+            }
+        }
+
         return positions;
     }
 

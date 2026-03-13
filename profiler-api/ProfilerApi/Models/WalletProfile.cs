@@ -27,6 +27,9 @@ public class WalletProfile
     public SanctionsCheck? Sanctions { get; set; }
     public SmartMoneySignal? SmartMoney { get; set; }
     public MevExposure? MevExposure { get; set; }
+    public PnlSummary? Pnl { get; set; }
+    public List<LpPosition> LpPositions { get; set; } = [];
+    public LiquidationRisk? LiquidationRisk { get; set; }
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -579,4 +582,66 @@ public class MultiChainProfile
     public Dictionary<string, WalletProfile> ChainProfiles { get; set; } = new();
     public List<string> ActiveChains { get; set; } = [];
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
+}
+
+// --- v3.1: P&L Tracking ---
+
+public class PnlSummary
+{
+    public decimal? TotalRealizedPnlUsd { get; set; }
+    public decimal? TotalUnrealizedPnlUsd { get; set; }
+    public decimal? TotalPnlUsd { get; set; }
+    public decimal? TotalPnlPct { get; set; }
+    public int TokensAnalyzed { get; set; }
+    public int ProfitableTokens { get; set; }
+    public int LosingTokens { get; set; }
+    public List<TokenPnl> TopGainers { get; set; } = [];
+    public List<TokenPnl> TopLosers { get; set; } = [];
+    public List<TokenPnl> AllTokenPnl { get; set; } = [];
+    public DateTime CalculatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class TokenPnl
+{
+    public string TokenSymbol { get; set; } = string.Empty;
+    public string TokenAddress { get; set; } = string.Empty;
+    public decimal TotalBought { get; set; }
+    public decimal TotalSold { get; set; }
+    public decimal? CostBasisUsd { get; set; }
+    public decimal? RealizedPnlUsd { get; set; }
+    public decimal? UnrealizedPnlUsd { get; set; }
+    public decimal? CurrentHolding { get; set; }
+    public decimal? CurrentValueUsd { get; set; }
+    public decimal? PnlPct { get; set; }
+}
+
+// --- v3.1: Uniswap V3 LP Positions ---
+
+public class LpPosition
+{
+    public string Protocol { get; set; } = "Uniswap V3";
+    public int TokenId { get; set; }
+    public string Token0Symbol { get; set; } = string.Empty;
+    public string Token1Symbol { get; set; } = string.Empty;
+    public string Token0Address { get; set; } = string.Empty;
+    public string Token1Address { get; set; } = string.Empty;
+    public int FeeTier { get; set; }
+    public decimal Liquidity { get; set; }
+    public decimal? TokensOwed0 { get; set; }
+    public decimal? TokensOwed1 { get; set; }
+    public bool InRange { get; set; }
+    public string Status { get; set; } = "active"; // active, closed, out-of-range
+}
+
+// --- v3.1: Liquidation Risk ---
+
+public class LiquidationRisk
+{
+    public decimal? AaveHealthFactor { get; set; }
+    public string AaveRiskLevel { get; set; } = "none"; // none, safe, watch, warning, danger
+    public decimal? AaveCollateralUsd { get; set; }
+    public decimal? AaveDebtUsd { get; set; }
+    public decimal? CompoundBorrowBalance { get; set; }
+    public string OverallRisk { get; set; } = "none"; // none, safe, watch, warning, danger
+    public List<string> Alerts { get; set; } = [];
 }

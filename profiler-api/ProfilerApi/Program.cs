@@ -1,6 +1,8 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using ProfilerApi.Data;
 using ProfilerApi.Models;
 using ProfilerApi.Services;
 
@@ -10,6 +12,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 1_048_576);
 
 builder.Services.AddMemoryCache();
+
+// PostgreSQL (optional — falls back to in-memory if not configured)
+var pgConnection = builder.Configuration.GetConnectionString("ProfilerDb");
+if (!string.IsNullOrEmpty(pgConnection))
+{
+    builder.Services.AddDbContext<ProfilerDbContext>(options =>
+        options.UseNpgsql(pgConnection));
+}
 
 // Redis distributed cache (optional — falls back to memory if not configured)
 var redisConnection = builder.Configuration["Redis:ConnectionString"];
@@ -43,6 +53,9 @@ builder.Services.AddSingleton<ReputationBadgeService>();
 builder.Services.AddSingleton<SocialIdentityService>();
 builder.Services.AddSingleton<ReferralService>();
 builder.Services.AddSingleton<WalletComparisonService>();
+builder.Services.AddSingleton<PnlService>();
+builder.Services.AddSingleton<LpPositionService>();
+builder.Services.AddSingleton<LiquidationRiskService>();
 builder.Services.AddScoped<ProfileOrchestrator>();
 builder.Services.AddSingleton<MonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorService>());
@@ -71,6 +84,22 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Auto-migrate PostgreSQL if configured
+if (!string.IsNullOrEmpty(pgConnection))
+{
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ProfilerDbContext>();
+        db.Database.EnsureCreated();
+        app.Logger.LogInformation("PostgreSQL database initialized");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "PostgreSQL not available — falling back to in-memory storage");
+    }
+}
 
 app.UseCors();
 
@@ -1059,6 +1088,125 @@ app.MapGet("/gas/{address}", async (
     }
 });
 
+// --- GET /pnl/{address} (v3.1) ---
+app.MapGet("/pnl/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("pnl");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        // Build standard profile (includes P&L calculation)
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "standard");
+        return Results.Ok(new
+        {
+            address,
+            chain,
+            pnl = profile.Pnl,
+            totalValueUsd = profile.TotalValueUsd,
+            profiledAt = profile.ProfiledAt
+        });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
+    }
+});
+
+// --- GET /lp-positions/{address} (v3.1) ---
+app.MapGet("/lp-positions/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("lp_positions");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "standard");
+        return Results.Ok(new
+        {
+            address,
+            chain,
+            lpPositions = profile.LpPositions,
+            totalPositions = profile.LpPositions.Count,
+            activePositions = profile.LpPositions.Count(p => p.Status == "active"),
+            profiledAt = profile.ProfiledAt
+        });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
+    }
+});
+
+// --- GET /liquidation-risk/{address} (v3.1) ---
+app.MapGet("/liquidation-risk/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("liquidation_risk");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "standard");
+        return Results.Ok(new
+        {
+            address,
+            chain,
+            liquidationRisk = profile.LiquidationRisk,
+            defiPositions = profile.DeFiPositions,
+            profiledAt = profile.ProfiledAt
+        });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
+    }
+});
+
 // --- GET /sla (v1.5) ---
 app.MapGet("/sla", (SlaTrackingService sla, ProfileCacheService cache) =>
 {
@@ -1093,7 +1241,7 @@ app.MapGet("/tiers", () => Results.Ok(new
     standard = new
     {
         fee = "0.001 ETH",
-        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support", "Token transfer history timeline", "Similar wallet clustering", "Revoke recommendation engine", "OFAC sanctions screening", "Smart money analysis", "Portfolio snapshots & history", "MEV exposure detection" }
+        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (12 protocols)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support", "Token transfer history timeline", "Similar wallet clustering", "Revoke recommendation engine", "OFAC sanctions screening", "Smart money analysis", "Portfolio snapshots & history", "MEV exposure detection", "P&L tracking (FIFO)", "Uniswap V3 LP positions", "Liquidation risk monitoring" }
     },
     premium = new
     {

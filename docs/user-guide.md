@@ -1,4 +1,4 @@
-# Wallet Profiler v3.0 — User Guide
+# Wallet Profiler v3.1 — User Guide
 
 ## Overview
 
@@ -31,7 +31,7 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 | Wallet tags | Yes | Yes | Yes |
 | USD prices for tokens | — | Yes | Yes |
 | Total portfolio value | — | Yes | Yes |
-| DeFi positions (9 protocols) | — | Yes | Yes |
+| DeFi positions (12 protocols) | — | Yes | Yes |
 | Transaction activity history | — | Yes | Yes |
 | Portfolio quality score | — | Yes | Yes |
 | ACP trust score | — | Yes | Yes |
@@ -43,6 +43,9 @@ The service offers three pricing tiers (basic, standard, premium) and runs on th
 | Revoke recommendation engine | — | Yes | Yes |
 | OFAC sanctions screening | — | Yes | Yes |
 | Smart money analysis | — | Yes | Yes |
+| P&L tracking (FIFO cost basis) | — | Yes | Yes |
+| Uniswap V3 LP positions | — | Yes | Yes |
+| Liquidation risk monitoring | — | Yes | Yes |
 | Portfolio snapshots & history | — | Yes | Yes |
 | Natural language summary | — | — | Yes |
 
@@ -338,6 +341,9 @@ curl http://localhost:5000/tiers
 | `sanctions` | object? | Std+ | OFAC sanctions screening results |
 | `smartMoney` | object? | Std+ | Smart money classification and analysis |
 | `mevExposure` | object? | Std+ | MEV exposure detection results |
+| `pnl` | object? | Std+ | P&L summary with FIFO cost basis |
+| `lpPositions` | array? | Std+ | Uniswap V3 LP positions |
+| `liquidationRisk` | object? | Std+ | Aave/Compound liquidation risk |
 | `summary` | string? | Premium | Natural language wallet summary |
 
 ### Wallet Tags
@@ -514,6 +520,70 @@ curl "http://localhost:5000/gas/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 ```
 
 Returns total gas spent in ETH, average gas price, transaction count breakdown, and spending patterns.
+
+### P&L Tracking (v3.1)
+
+**Endpoint:** `GET /pnl/{address}?chain=ethereum`
+
+Calculates realized and unrealized profit/loss using FIFO cost basis from transfer history.
+
+```bash
+curl "http://localhost:5000/pnl/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+```
+
+| Field | Description |
+|---|---|
+| `totalRealizedPnlUsd` | Total realized P&L across all tokens |
+| `totalUnrealizedPnlUsd` | Total unrealized P&L from current holdings |
+| `totalPnlUsd` | Combined realized + unrealized P&L |
+| `totalPnlPct` | P&L as percentage of cost basis |
+| `tokensAnalyzed` | Number of tokens with transfer data |
+| `profitableTokens` | Count of tokens with positive P&L |
+| `losingTokens` | Count of tokens with negative P&L |
+| `topGainers` | Top 5 tokens by P&L (positive) |
+| `topLosers` | Top 5 tokens by P&L (negative) |
+| `allTokenPnl` | Per-token P&L breakdown (top 20 by absolute value) |
+
+### Uniswap V3 LP Positions (v3.1)
+
+**Endpoint:** `GET /lp-positions/{address}?chain=ethereum`
+
+Detects Uniswap V3 liquidity positions from the NonfungiblePositionManager contract.
+
+```bash
+curl "http://localhost:5000/lp-positions/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+```
+
+| Field | Description |
+|---|---|
+| `protocol` | Always "Uniswap V3" |
+| `tokenId` | NFT token ID for the position |
+| `token0Symbol` / `token1Symbol` | Token pair symbols |
+| `feeTier` | Fee tier (e.g., 3000 = 0.3%) |
+| `liquidity` | Current liquidity amount |
+| `tokensOwed0` / `tokensOwed1` | Uncollected fees |
+| `inRange` | Whether position is currently in range |
+| `status` | `active`, `closed`, or `out-of-range` |
+
+### Liquidation Risk Monitoring (v3.1)
+
+**Endpoint:** `GET /liquidation-risk/{address}?chain=ethereum`
+
+Monitors Aave V3 health factor and Compound V3 borrow balance.
+
+```bash
+curl "http://localhost:5000/liquidation-risk/0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+```
+
+| Field | Description |
+|---|---|
+| `aaveHealthFactor` | Aave V3 health factor (< 1.0 = liquidation) |
+| `aaveRiskLevel` | `none`, `safe`, `watch`, `warning`, or `danger` |
+| `aaveCollateralUsd` | Total Aave collateral in USD |
+| `aaveDebtUsd` | Total Aave debt in USD |
+| `compoundBorrowBalance` | Compound V3 USDC borrow balance |
+| `overallRisk` | Combined risk level |
+| `alerts` | Specific risk alerts |
 
 ### Token Holder Analysis (v1.6, enhanced v3.0)
 
@@ -845,7 +915,7 @@ acp wallet balance           # check earnings
 - Summary is only included with the `premium` tier
 
 **DeFi positions empty:**
-- 9 protocols are checked: Aave V3, Compound V3, Lido (stETH/wstETH), Rocket Pool (rETH), Coinbase (cbETH), EtherFi (weETH), Frax (sfrxETH), MakerDAO (sDAI), EigenLayer (restaking), Ethena (sUSDe)
+- 12 protocols are checked: Aave V3, Compound V3, Lido (stETH/wstETH), Rocket Pool (rETH), Coinbase (cbETH), EtherFi (weETH), Frax (sfrxETH), MakerDAO (sDAI), EigenLayer (restaking), Ethena (sUSDe), Morpho MetaMorpho vaults, Aura Finance (auraBAL), plus Pendle (PT-*/YT-* symbol detection)
 - Currently Ethereum-only (except Aave V3 which works cross-chain)
 
 **Portfolio quality / ACP trust / approval risk is null:**

@@ -1,20 +1,25 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
+using ProfilerApi.Data;
 using ProfilerApi.Models;
 
 namespace ProfilerApi.Services;
 
 /// <summary>
-/// Stores portfolio snapshots with Redis persistence (when available)
-/// and in-memory fallback. Snapshots survive container restarts when Redis is configured.
+/// Stores portfolio snapshots with PostgreSQL persistence (preferred),
+/// Redis L2 cache, and in-memory fallback.
+/// Priority: PostgreSQL > Redis > In-memory.
 /// </summary>
 public class SnapshotService
 {
     private readonly ConcurrentDictionary<string, List<PortfolioSnapshot>> _snapshots = new();
     private readonly IDistributedCache? _distCache;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<SnapshotService> _logger;
     private readonly bool _useRedis;
+    private readonly bool _usePostgres;
 
     private const int MaxSnapshotsPerAddress = 200;
     private static readonly TimeSpan RedisTtl = TimeSpan.FromDays(90);
@@ -23,30 +28,33 @@ public class SnapshotService
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public SnapshotService(ILogger<SnapshotService> logger, IDistributedCache? distCache = null, IConfiguration? config = null)
+    public SnapshotService(
+        ILogger<SnapshotService> logger,
+        IServiceProvider serviceProvider,
+        IDistributedCache? distCache = null,
+        IConfiguration? config = null)
     {
         _logger = logger;
+        _serviceProvider = serviceProvider;
         _distCache = distCache;
         _useRedis = !string.IsNullOrEmpty(config?["Redis:ConnectionString"]);
-        if (_useRedis)
+        _usePostgres = !string.IsNullOrEmpty(config?["ConnectionStrings:ProfilerDb"]);
+
+        if (_usePostgres)
+            _logger.LogInformation("Snapshot persistence: PostgreSQL");
+        else if (_useRedis)
             _logger.LogInformation("Snapshot persistence: Redis (90-day TTL)");
         else
             _logger.LogInformation("Snapshot persistence: in-memory only");
     }
 
-    /// <summary>
-    /// Records a snapshot from a completed profile.
-    /// Deduplicates by only storing one snapshot per hour per address.
-    /// Persists to Redis when available.
-    /// </summary>
     public void RecordSnapshot(WalletProfile profile)
     {
         var key = profile.Address.ToLowerInvariant();
-        var snapshots = _snapshots.GetOrAdd(key, _ => LoadFromRedis(key));
+        var snapshots = _snapshots.GetOrAdd(key, _ => LoadSnapshots(key));
 
         lock (snapshots)
         {
-            // Deduplicate: skip if last snapshot was less than 1 hour ago
             if (snapshots.Count > 0)
             {
                 var last = snapshots[^1];
@@ -54,7 +62,7 @@ public class SnapshotService
                     return;
             }
 
-            snapshots.Add(new PortfolioSnapshot
+            var snapshot = new PortfolioSnapshot
             {
                 Address = profile.Address,
                 TotalValueUsd = profile.TotalValueUsd,
@@ -62,24 +70,25 @@ public class SnapshotService
                 TokenCount = profile.TopTokens.Count(t => !t.IsSpam),
                 TransactionCount = profile.TransactionCount,
                 SnapshotAt = DateTime.UtcNow
-            });
+            };
 
-            // Cap stored snapshots
+            snapshots.Add(snapshot);
+
             while (snapshots.Count > MaxSnapshotsPerAddress)
                 snapshots.RemoveAt(0);
 
-            // Persist to Redis
-            SaveToRedis(key, snapshots);
+            // Persist
+            if (_usePostgres)
+                SaveToPostgres(snapshot);
+            else
+                SaveToRedis(key, snapshots);
         }
     }
 
-    /// <summary>
-    /// Returns historical snapshots for an address.
-    /// </summary>
     public PortfolioHistory GetHistory(string address, int days = 30)
     {
         var key = address.ToLowerInvariant();
-        var snapshots = _snapshots.GetOrAdd(key, _ => LoadFromRedis(key));
+        var snapshots = _snapshots.GetOrAdd(key, _ => LoadSnapshots(key));
 
         List<PortfolioSnapshot> filtered;
         lock (snapshots)
@@ -112,6 +121,68 @@ public class SnapshotService
         };
     }
 
+    private List<PortfolioSnapshot> LoadSnapshots(string addressKey)
+    {
+        if (_usePostgres)
+            return LoadFromPostgres(addressKey);
+        if (_useRedis)
+            return LoadFromRedis(addressKey);
+        return new List<PortfolioSnapshot>();
+    }
+
+    private List<PortfolioSnapshot> LoadFromPostgres(string addressKey)
+    {
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ProfilerDbContext>();
+            var cutoff = DateTime.UtcNow.AddDays(-90);
+
+            return db.Snapshots
+                .Where(s => s.Address == addressKey && s.SnapshotAt >= cutoff)
+                .OrderBy(s => s.SnapshotAt)
+                .Take(MaxSnapshotsPerAddress)
+                .Select(s => new PortfolioSnapshot
+                {
+                    Address = s.Address,
+                    TotalValueUsd = s.TotalValueUsd,
+                    EthBalance = s.EthBalance,
+                    TokenCount = s.TokenCount,
+                    TransactionCount = s.TransactionCount,
+                    SnapshotAt = s.SnapshotAt
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load snapshots from PostgreSQL for {Address}", addressKey);
+            return new List<PortfolioSnapshot>();
+        }
+    }
+
+    private void SaveToPostgres(PortfolioSnapshot snapshot)
+    {
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ProfilerDbContext>();
+            db.Snapshots.Add(new SnapshotEntity
+            {
+                Address = snapshot.Address.ToLowerInvariant(),
+                TotalValueUsd = snapshot.TotalValueUsd,
+                EthBalance = snapshot.EthBalance,
+                TokenCount = snapshot.TokenCount,
+                TransactionCount = snapshot.TransactionCount,
+                SnapshotAt = snapshot.SnapshotAt
+            });
+            db.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save snapshot to PostgreSQL for {Address}", snapshot.Address);
+        }
+    }
+
     private List<PortfolioSnapshot> LoadFromRedis(string addressKey)
     {
         if (!_useRedis || _distCache == null)
@@ -124,10 +195,7 @@ public class SnapshotService
             {
                 var loaded = JsonSerializer.Deserialize<List<PortfolioSnapshot>>(json, JsonOpts);
                 if (loaded != null)
-                {
-                    _logger.LogDebug("Loaded {Count} snapshots from Redis for {Address}", loaded.Count, addressKey);
                     return loaded;
-                }
             }
         }
         catch (Exception ex)

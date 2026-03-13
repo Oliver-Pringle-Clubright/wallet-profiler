@@ -1,4 +1,4 @@
-# Wallet Profiler v3.0 — Technical Specifications
+# Wallet Profiler v3.1 — Technical Specifications
 
 ## 1. Technology Stack
 
@@ -16,6 +16,7 @@
 | **Price Data** | DeFi Llama API | Free tier |
 | **Ecosystem Data** | CoinGecko API | Free tier |
 | **Solana RPC** | Alchemy / Public RPC | Free tier |
+| **Database (optional)** | PostgreSQL + EF Core (Npgsql) | 9.0.4 |
 
 ## 2. Project Structure
 
@@ -38,7 +39,7 @@ wallet-profiler/
 │           ├── EthereumService.cs        # Nethereum RPC + ENS (cached)
 │           ├── TokenService.cs           # Alchemy getTokenBalances + spam detection
 │           ├── PriceService.cs           # DeFi Llama USD pricing (cached)
-│           ├── DeFiService.cs            # 9-protocol DeFi scanner
+│           ├── DeFiService.cs            # 12-protocol DeFi scanner (+Morpho, Aura, Pendle)
 │           ├── ActivityService.cs        # Transaction history analysis
 │           ├── RiskScoringService.cs     # Heuristic risk scoring
 │           ├── WalletTaggingService.cs   # Wallet classification tags
@@ -66,7 +67,12 @@ wallet-profiler/
 │           ├── ReferralService.cs       # Agent referral program (v1.8)
 │           ├── WalletComparisonService.cs # Wallet comparison (v1.8)
 │           ├── SolanaService.cs          # Solana JSON-RPC client (v2.6)
-│           └── VirtualsIntelService.cs   # CoinGecko ecosystem data (v2.8)
+│           ├── VirtualsIntelService.cs   # CoinGecko ecosystem data (v2.8)
+│           ├── PnlService.cs            # FIFO cost basis P&L calculation (v3.1)
+│           ├── LpPositionService.cs     # Uniswap V3 LP position detection (v3.1)
+│           └── LiquidationRiskService.cs # Aave/Compound liquidation risk (v3.1)
+│       └── Data/
+│           └── ProfilerDbContext.cs      # EF Core DbContext (PostgreSQL, v3.1)
 ├── acp-service/                          # TypeScript ACP proxy
 │   ├── Dockerfile
 │   ├── package.json
@@ -286,6 +292,45 @@ Returns gas spending analysis for a wallet.
 **Response:** `200 OK` — Gas spending summary JSON with total gas spent, average gas price, and transaction breakdown.
 
 **Response time:** ~3s.
+
+### GET /pnl/{address} (v3.1)
+
+Returns FIFO cost basis P&L calculation from transfer history and current holdings.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `address` | string (path) | Yes | — | Wallet address |
+| `chain` | string (query) | No | `"ethereum"` | Chain to query |
+
+**Response:** `200 OK` — PnlSummary JSON with realized/unrealized P&L, per-token breakdown, top gainers/losers.
+
+**Response time:** ~5s.
+
+### GET /lp-positions/{address} (v3.1)
+
+Returns Uniswap V3 LP positions from NonfungiblePositionManager.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `address` | string (path) | Yes | — | Wallet address |
+| `chain` | string (query) | No | `"ethereum"` | Chain to query |
+
+**Response:** `200 OK` — Array of LpPosition objects with token pair, fee tier, liquidity, owed fees, in-range status.
+
+**Response time:** ~5s.
+
+### GET /liquidation-risk/{address} (v3.1)
+
+Returns Aave V3 health factor and Compound V3 borrow balance analysis.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `address` | string (path) | Yes | — | Wallet address |
+| `chain` | string (query) | No | `"ethereum"` | Chain to query |
+
+**Response:** `200 OK` — LiquidationRisk JSON with health factor, risk levels, collateral/debt values, alerts.
+
+**Response time:** ~5s.
 
 ### GET /token/{contract}/holders (v1.6)
 

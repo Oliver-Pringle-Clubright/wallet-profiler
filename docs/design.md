@@ -1,4 +1,4 @@
-# Wallet Profiler v3.0 — Design Document
+# Wallet Profiler v3.1 — Design Document
 
 ## 1. Problem Statement
 
@@ -375,27 +375,6 @@ Updated all 6 ACP offering descriptions with:
 
 Deepanalysis is the highest-margin offering ($0.10/job). Enhanced with automatic wallet comparison when multiple addresses are provided — the batch response now includes a `comparison` object with common tokens, leader identification, and unique insights alongside individual profiles. This makes deepanalysis the go-to offering for comprehensive multi-wallet intelligence.
 
-### ACP Offering Lineup (v3.0)
-
-| Offering | Fee | Response | Use Case |
-|---|---|---|---|
-| walletstatus | $0.01 | ~200ms | Pre-filtering, address validation (8 chains incl. Solana) |
-| quickcheck | $0.01 | ~500ms | Trust scoring, counterparty check (8 chains incl. Solana) |
-| virtualsintel | $0.01 | ~2s | Virtuals ecosystem intelligence, AI agent token tracking |
-| riskscore | $0.02 | ~3s | Risk assessment, AML, fraud detection (7 EVM chains) |
-| whalealerts | $0.02 | ~3s | Exchange flow, whale tracking |
-| reputation | $0.02 | ~3s | On-chain reputation badge (soulbound NFT metadata) |
-| identity | $0.02 | ~3s | Social identity resolution (ENS, governance, social signals) |
-| gasspend | $0.02 | ~3s | Gas spending analysis, monthly breakdown, tax reporting |
-| walletprofiler | $0.03 | ~5s | Full profiling, batch analysis |
-| portfoliohistory | $0.03 | ~2s | Historical portfolio snapshots, value tracking |
-| tokenscreen | $0.03 | ~8s | Token holder distribution, whale detection, rug pull risk |
-| approvalaudit | $0.03 | ~5s | Token approval security audit, revoke recommendations |
-| walletcompare | $0.04 | ~10s | Compare 2-10 wallets side-by-side |
-| multichain | $0.05 | ~15s | Multi-chain profile across up to 5 EVM chains |
-| tokenholders | $0.05 | ~8s | Token concentration, rug pull risk |
-| deepanalysis | $0.10 | ~15s | Cross-chain, comparison, AI summary |
-
 ## 21. v2.8 — Virtuals Ecosystem Intelligence
 
 Added `virtualsintel` offering at $0.01 — serves the Virtuals community directly. `GET /virtuals/ecosystem` fetches live data from CoinGecko (free API) for VIRTUAL token and top AI agent tokens ($AIXBT, $GAME, $LUNA, $VADER, $SEKOIA, $AIMONICA, $MISATO, $CONVO, $BIO). Returns prices, market caps, 24h volume, price changes, ecosystem totals, health sentiment, and natural language summary. Cached for 5 minutes to respect CoinGecko rate limits. Mirrors ChainScope's `virtuals_intel` offering — a key differentiator for marketplace relevance.
@@ -497,6 +476,91 @@ Expanded from 2 protocols (Aave V3, Compound V3) to 9, all checked in parallel:
 | MakerDAO | sDAI (DSR savings) | savings |
 | EigenLayer | stETH, cbETH, rETH strategies | restaking |
 | Ethena | sUSDe | yield |
+
+## 24. v3.1 — P&L, LP Positions, Liquidation Risk & DeFi Expansion
+
+### Real P&L Tracking (FIFO Cost Basis)
+
+New `PnlService` calculates realized and unrealized P&L from transfer history using FIFO (First-In-First-Out) cost basis accounting. For each token:
+- **Buys** are recorded as cost lots in a queue (amount + price per unit)
+- **Sells** consume the oldest lots first, computing realized gain/loss
+- **Unrealized P&L** is calculated from remaining lots vs current market value
+- Returns per-token breakdown (top 20), top 5 gainers/losers, totals, and P&L percentage
+
+Available on standard and premium tiers. Depends on transfer history data.
+
+**Endpoint:** `GET /pnl/{address}?chain=ethereum`
+
+### Uniswap V3 LP Position Detection
+
+New `LpPositionService` reads Uniswap V3 NonfungiblePositionManager (0xC36442b4a4522E871399CD717aBDD847Ab11FE88) to discover LP positions:
+1. `balanceOf(address)` → number of positions
+2. `tokenOfOwnerByIndex(address, i)` → token IDs (up to 10)
+3. `positions(tokenId)` → full position data (12 output parameters)
+
+Returns token pair, fee tier, liquidity, owed fees, in-range status, and position status (active/closed/out-of-range). Includes 20 known token address→symbol mappings for common pairs.
+
+**Endpoint:** `GET /lp-positions/{address}?chain=ethereum`
+
+### Liquidation Risk Monitoring
+
+New `LiquidationRiskService` monitors lending protocol health in parallel:
+
+**Aave V3:** Reads `getUserAccountData()` for health factor (18-decimal), total collateral/debt USD values. Risk levels:
+- `danger` — health factor < 1.0 (liquidation imminent) or < 1.1
+- `warning` — health factor < 1.3
+- `watch` — health factor < 1.5
+- `safe` — health factor ≥ 1.5
+
+**Compound V3:** Reads `borrowBalanceOf()` on cUSDC contract (6 decimals) to detect active borrows.
+
+**Endpoint:** `GET /liquidation-risk/{address}?chain=ethereum`
+
+### DeFi Protocol Expansion (12 → 15 protocols)
+
+Expanded DeFi coverage with 3 new protocol families:
+
+| Protocol | Assets Detected | Type | Method |
+|---|---|---|---|
+| Morpho (MetaMorpho) | Gauntlet WETH/USDC, Steakhouse USDC, Re7 WETH vaults | lending | ERC-4626 balanceOf |
+| Aura Finance | auraBAL balance | yield | ERC-20 balanceOf |
+| Pendle Finance | PT-*/YT-* tokens | yield | Symbol detection from existing token list (zero RPC calls) |
+
+Total DeFi protocols now: 12 via RPC (Aave, Compound, Lido, Rocket Pool, Coinbase, EtherFi, Frax, MakerDAO, EigenLayer, Ethena, Morpho, Aura) + Pendle via symbol detection.
+
+### PostgreSQL Database (Optional)
+
+Added optional PostgreSQL persistence via Entity Framework Core (`Npgsql.EntityFrameworkCore.PostgreSQL`). When `ConnectionStrings:ProfilerDb` is configured:
+- Portfolio snapshots persist to PostgreSQL (previously Redis-only or in-memory)
+- Referral data persists across restarts
+- P&L records can be stored for historical analysis
+- Tables auto-created via `EnsureCreated()` on startup
+
+Falls back to Redis → in-memory when PostgreSQL is not configured. Three entity tables: `portfolio_snapshots`, `referrals`, `pnl_records`.
+
+### ACP Offering Lineup (v3.1)
+
+| Offering | Fee | Response | Use Case |
+|---|---|---|---|
+| walletstatus | $0.01 | ~200ms | Pre-filtering, address validation (8 chains incl. Solana) |
+| quickcheck | $0.01 | ~500ms | Trust scoring, counterparty check (8 chains incl. Solana) |
+| virtualsintel | $0.01 | ~2s | Virtuals ecosystem intelligence, AI agent token tracking |
+| riskscore | $0.02 | ~3s | Risk assessment, AML, fraud detection (7 EVM chains) |
+| whalealerts | $0.02 | ~3s | Exchange flow, whale tracking |
+| reputation | $0.02 | ~3s | On-chain reputation badge (soulbound NFT metadata) |
+| identity | $0.02 | ~3s | Social identity resolution (ENS, governance, social signals) |
+| gasspend | $0.02 | ~3s | Gas spending analysis, monthly breakdown, tax reporting |
+| walletprofiler | $0.03 | ~5s | Full profiling, batch analysis |
+| portfoliohistory | $0.03 | ~2s | Historical portfolio snapshots, value tracking |
+| tokenscreen | $0.03 | ~8s | Token holder distribution, whale detection, rug pull risk |
+| approvalaudit | $0.03 | ~5s | Token approval security audit, revoke recommendations |
+| pnl | $0.03 | ~5s | P&L tracking with FIFO cost basis |
+| lppositions | $0.03 | ~5s | Uniswap V3 LP position detection |
+| liquidationrisk | $0.03 | ~5s | Aave/Compound liquidation risk monitoring |
+| walletcompare | $0.04 | ~10s | Compare 2-10 wallets side-by-side |
+| multichain | $0.05 | ~15s | Multi-chain profile across up to 5 EVM chains |
+| tokenholders | $0.05 | ~8s | Token concentration, rug pull risk |
+| deepanalysis | $0.10 | ~15s | Cross-chain, comparison, AI summary |
 
 ### Security Hardening (v3.0)
 
