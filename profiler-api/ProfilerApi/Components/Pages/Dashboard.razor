@@ -1,0 +1,381 @@
+@page "/dashboard"
+@page "/dashboard/{Address}"
+@using ProfilerApi.Models
+@using ProfilerApi.Services
+@inject ProfileOrchestrator Orchestrator
+@inject RebalancingService Rebalancing
+@inject AirdropEligibilityService Airdrops
+@inject ILogger<Dashboard> Logger
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<div class="dashboard-container">
+    <header class="dashboard-header">
+        <h1>WalletProfiler Dashboard</h1>
+        <div class="search-bar">
+            <input type="text" @bind="searchAddress" @bind:event="oninput"
+                   @onkeydown="HandleKeyDown"
+                   placeholder="Enter wallet address (0x...) or ENS name" />
+            <button @onclick="LoadProfile" disabled="@isLoading">
+                @(isLoading ? "Loading..." : "Analyze")
+            </button>
+        </div>
+    </header>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="error-banner">@errorMessage</div>
+    }
+
+    @if (profile != null)
+    {
+        <div class="profile-grid">
+            <!-- Overview Card -->
+            <div class="card overview-card">
+                <h2>Overview</h2>
+                <div class="overview-stats">
+                    <div class="stat">
+                        <span class="stat-label">Address</span>
+                        <span class="stat-value address-value">@TruncateAddress(profile.Address)</span>
+                    </div>
+                    @if (profile.EnsName != null)
+                    {
+                        <div class="stat">
+                            <span class="stat-label">ENS</span>
+                            <span class="stat-value">@profile.EnsName</span>
+                        </div>
+                    }
+                    <div class="stat">
+                        <span class="stat-label">Total Value</span>
+                        <span class="stat-value">$@((profile.TotalValueUsd ?? 0).ToString("N2"))</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">ETH Balance</span>
+                        <span class="stat-value">@profile.EthBalance.ToString("F4") ETH</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Transactions</span>
+                        <span class="stat-value">@profile.TransactionCount.ToString("N0")</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Tags</span>
+                        <span class="stat-value tags">
+                            @foreach (var tag in profile.Tags.Take(5))
+                            {
+                                <span class="tag">@tag</span>
+                            }
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Risk Gauge -->
+            <div class="card risk-card">
+                <h2>Risk Assessment</h2>
+                <div class="risk-gauge">
+                    <div class="gauge-circle @GetRiskClass(profile.Risk.Level)">
+                        <span class="gauge-value">@profile.Risk.Score</span>
+                        <span class="gauge-label">@profile.Risk.Level.ToUpper()</span>
+                    </div>
+                </div>
+                @if (profile.Risk.Flags.Count > 0)
+                {
+                    <ul class="risk-flags">
+                        @foreach (var flag in profile.Risk.Flags.Take(5))
+                        {
+                            <li>@flag</li>
+                        }
+                    </ul>
+                }
+            </div>
+
+            <!-- Portfolio Quality -->
+            @if (profile.PortfolioQuality != null)
+            {
+                <div class="card quality-card">
+                    <h2>Portfolio Quality</h2>
+                    <div class="quality-grade grade-@profile.PortfolioQuality.Grade.ToLower()">
+                        @profile.PortfolioQuality.Grade
+                    </div>
+                    <div class="quality-score">Score: @profile.PortfolioQuality.QualityScore/100</div>
+                    <div class="quality-bars">
+                        <div class="bar-row">
+                            <span>Blue-chip</span>
+                            <div class="bar"><div class="bar-fill bluechip" style="width: @(Math.Min(profile.PortfolioQuality.BluechipPct, 100))%"></div></div>
+                            <span>@profile.PortfolioQuality.BluechipPct%</span>
+                        </div>
+                        <div class="bar-row">
+                            <span>Stablecoins</span>
+                            <div class="bar"><div class="bar-fill stablecoin" style="width: @(Math.Min(profile.PortfolioQuality.StablecoinPct, 100))%"></div></div>
+                            <span>@profile.PortfolioQuality.StablecoinPct%</span>
+                        </div>
+                        <div class="bar-row">
+                            <span>Spam</span>
+                            <div class="bar"><div class="bar-fill spam" style="width: @(Math.Min(profile.PortfolioQuality.SpamPct, 100))%"></div></div>
+                            <span>@profile.PortfolioQuality.SpamPct%</span>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <!-- Token Holdings (Pie-like list) -->
+            <div class="card tokens-card">
+                <h2>Token Holdings</h2>
+                <div class="token-list">
+                    @foreach (var token in profile.TopTokens.Where(t => !t.IsSpam && t.ValueUsd > 0).OrderByDescending(t => t.ValueUsd).Take(10))
+                    {
+                        var pct = profile.TotalValueUsd > 0 ? (token.ValueUsd ?? 0) / profile.TotalValueUsd.Value * 100 : 0;
+                        <div class="token-row">
+                            <span class="token-symbol">@token.Symbol</span>
+                            <div class="token-bar-container">
+                                <div class="token-bar" style="width: @(Math.Min(pct, 100).ToString("F1"))%; background: @GetTokenColor(token.Symbol)"></div>
+                            </div>
+                            <span class="token-value">$@((token.ValueUsd ?? 0).ToString("N2"))</span>
+                            <span class="token-pct">@pct.ToString("F1")%</span>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- DeFi Positions -->
+            @if (profile.DeFiPositions.Count > 0)
+            {
+                <div class="card defi-card">
+                    <h2>DeFi Positions (@profile.DeFiPositions.Count)</h2>
+                    <table class="data-table">
+                        <thead><tr><th>Protocol</th><th>Type</th><th>Asset</th><th>Amount</th></tr></thead>
+                        <tbody>
+                            @foreach (var pos in profile.DeFiPositions.Take(10))
+                            {
+                                <tr>
+                                    <td>@pos.Protocol</td>
+                                    <td>@pos.Type</td>
+                                    <td>@pos.Asset</td>
+                                    <td>@pos.Amount.ToString("F4")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <!-- P&L Summary -->
+            @if (profile.Pnl != null)
+            {
+                <div class="card pnl-card">
+                    <h2>Profit & Loss</h2>
+                    <div class="pnl-summary">
+                        <div class="pnl-main @(profile.Pnl.TotalPnlUsd >= 0 ? "pnl-positive" : "pnl-negative")">
+                            <span class="pnl-value">$@((profile.Pnl.TotalPnlUsd ?? 0).ToString("N2"))</span>
+                            <span class="pnl-pct">@((profile.Pnl.TotalPnlPct ?? 0).ToString("+0.0;-0.0"))%</span>
+                        </div>
+                        <div class="pnl-details">
+                            <div class="pnl-detail">
+                                <span>Realized</span>
+                                <span class="@(profile.Pnl.TotalRealizedPnlUsd >= 0 ? "pnl-positive" : "pnl-negative")">
+                                    $@((profile.Pnl.TotalRealizedPnlUsd ?? 0).ToString("N2"))
+                                </span>
+                            </div>
+                            <div class="pnl-detail">
+                                <span>Unrealized</span>
+                                <span class="@(profile.Pnl.TotalUnrealizedPnlUsd >= 0 ? "pnl-positive" : "pnl-negative")">
+                                    $@((profile.Pnl.TotalUnrealizedPnlUsd ?? 0).ToString("N2"))
+                                </span>
+                            </div>
+                            <div class="pnl-detail">
+                                <span>Winners / Losers</span>
+                                <span>@profile.Pnl.ProfitableTokens / @profile.Pnl.LosingTokens</span>
+                            </div>
+                        </div>
+                    </div>
+                    @if (profile.Pnl.TopGainers.Count > 0)
+                    {
+                        <h3>Top Gainers</h3>
+                        @foreach (var gainer in profile.Pnl.TopGainers.Take(3))
+                        {
+                            <div class="pnl-token pnl-positive">@gainer.TokenSymbol: $@((gainer.RealizedPnlUsd ?? 0 + gainer.UnrealizedPnlUsd ?? 0).ToString("N2"))</div>
+                        }
+                    }
+                </div>
+            }
+
+            <!-- Liquidation Risk -->
+            @if (profile.LiquidationRisk != null && profile.LiquidationRisk.OverallRisk != "none")
+            {
+                <div class="card liquidation-card">
+                    <h2>Liquidation Risk</h2>
+                    <div class="liq-status @GetRiskClass(profile.LiquidationRisk.OverallRisk)">
+                        @profile.LiquidationRisk.OverallRisk.ToUpper()
+                    </div>
+                    @if (profile.LiquidationRisk.AaveHealthFactor.HasValue)
+                    {
+                        <div class="liq-detail">
+                            Aave Health Factor: <strong>@profile.LiquidationRisk.AaveHealthFactor.Value.ToString("F2")</strong>
+                        </div>
+                    }
+                    @foreach (var alert in profile.LiquidationRisk.Alerts)
+                    {
+                        <div class="liq-alert">@alert</div>
+                    }
+                </div>
+            }
+
+            <!-- LP Positions -->
+            @if (profile.LpPositions.Count > 0)
+            {
+                <div class="card lp-card">
+                    <h2>LP Positions (@profile.LpPositions.Count)</h2>
+                    <table class="data-table">
+                        <thead><tr><th>Pair</th><th>Fee</th><th>Status</th><th>In Range</th></tr></thead>
+                        <tbody>
+                            @foreach (var lp in profile.LpPositions.Take(10))
+                            {
+                                <tr>
+                                    <td>@lp.Token0Symbol / @lp.Token1Symbol</td>
+                                    <td>@(lp.FeeTier / 10000.0)%</td>
+                                    <td>@lp.Status</td>
+                                    <td class="@(lp.InRange ? "in-range" : "out-range")">@(lp.InRange ? "Yes" : "No")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <!-- Rebalancing Suggestions -->
+            @if (rebalancing != null && rebalancing.Count > 0)
+            {
+                <div class="card rebalance-card">
+                    <h2>Rebalancing Suggestions</h2>
+                    @foreach (var suggestion in rebalancing.Take(3))
+                    {
+                        <div class="rebalance-model">
+                            <div class="model-header">
+                                <span class="model-name">@suggestion.ModelPortfolio</span>
+                                <span class="model-fit">Fit: @suggestion.FitScore%</span>
+                            </div>
+                            <p class="model-desc">@suggestion.Description</p>
+                            @foreach (var action in suggestion.Actions)
+                            {
+                                <div class="rebalance-action action-@action.Action">
+                                    <span class="action-icon">@(action.Action == "increase" ? "+" : "-")</span>
+                                    @action.Category: @action.CurrentPct.ToString("F0")% → @action.TargetPct.ToString("F0")%
+                                    (@action.DeltaPct.ToString("+0;-0")%)
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            <!-- Airdrop Eligibility -->
+            @if (airdrops != null)
+            {
+                <div class="card airdrop-card">
+                    <h2>Airdrop Eligibility (@airdrops.EligibleCount/@airdrops.TotalChecked)</h2>
+                    @foreach (var check in airdrops.Checks.OrderByDescending(c => c.EligibilityPct))
+                    {
+                        <div class="airdrop-check status-@check.Status">
+                            <div class="airdrop-header">
+                                <span class="airdrop-protocol">@check.Protocol</span>
+                                <span class="airdrop-status">@check.Status.ToUpper()</span>
+                                <span class="airdrop-pct">@check.CriteriaMet/@check.TotalCriteria criteria</span>
+                            </div>
+                            <div class="airdrop-progress">
+                                <div class="airdrop-bar" style="width: @check.EligibilityPct%"></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+    else if (!isLoading && string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="welcome">
+            <h2>Enter a wallet address to get started</h2>
+            <p>Get a comprehensive portfolio analysis with risk assessment, DeFi positions, P&L tracking, rebalancing suggestions, and airdrop eligibility checks.</p>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Address { get; set; }
+
+    private string searchAddress = "";
+    private WalletProfile? profile;
+    private List<RebalanceSuggestion>? rebalancing;
+    private AirdropEligibility? airdrops;
+    private bool isLoading;
+    private string? errorMessage;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrEmpty(Address))
+        {
+            searchAddress = Address;
+            await LoadProfile();
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await LoadProfile();
+    }
+
+    private async Task LoadProfile()
+    {
+        if (string.IsNullOrWhiteSpace(searchAddress)) return;
+
+        isLoading = true;
+        errorMessage = null;
+        profile = null;
+        rebalancing = null;
+        airdrops = null;
+        StateHasChanged();
+
+        try
+        {
+            var address = searchAddress.Trim();
+            if (address.EndsWith(".eth"))
+                address = await Orchestrator.ResolveAddressAsync(address, "ethereum");
+
+            profile = await Orchestrator.BuildProfileAsync(address, "ethereum", "standard");
+            rebalancing = Rebalancing.Analyze(profile);
+            airdrops = Airdrops.Check(profile);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Dashboard profile load failed");
+            errorMessage = "Failed to load wallet profile. Please check the address and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string TruncateAddress(string addr) =>
+        addr.Length > 10 ? $"{addr[..6]}...{addr[^4..]}" : addr;
+
+    private static string GetRiskClass(string level) => level.ToLower() switch
+    {
+        "low" or "safe" => "risk-low",
+        "medium" or "watch" => "risk-medium",
+        "high" or "warning" => "risk-high",
+        "critical" or "danger" => "risk-critical",
+        _ => "risk-unknown"
+    };
+
+    private static readonly string[] TokenColors = [
+        "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
+        "#06b6d4", "#f97316", "#ec4899", "#14b8a6", "#6366f1"
+    ];
+
+    private static string GetTokenColor(string symbol)
+    {
+        var hash = Math.Abs(symbol.GetHashCode());
+        return TokenColors[hash % TokenColors.Length];
+    }
+}

@@ -11,6 +11,7 @@ services:
       - Etherscan__ApiKey=${ETHERSCAN_API_KEY}
       - Basescan__ApiKey=${BASESCAN_API_KEY:-}
       - Arbiscan__ApiKey=${ARBISCAN_API_KEY:-}
+      - Anthropic__ApiKey=${ANTHROPIC_API_KEY:-}
     healthcheck:
       test: ["CMD-SHELL", "dotnet --info > /dev/null 2>&1 || exit 1"]
       interval: 5s

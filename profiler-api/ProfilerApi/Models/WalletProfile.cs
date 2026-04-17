@@ -584,6 +584,90 @@ public class MultiChainProfile
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
+// --- v4.0: Rebalancing Suggestions ---
+
+public class RebalanceSuggestion
+{
+    public string ModelPortfolio { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public int FitScore { get; set; } // 0-100 how well current portfolio matches
+    public decimal BluechipPct { get; set; }
+    public decimal StablecoinPct { get; set; }
+    public decimal AltcoinPct { get; set; }
+    public List<RebalanceAction> Actions { get; set; } = [];
+    public DateTime CalculatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class RebalanceAction
+{
+    public string Action { get; set; } = string.Empty; // "increase", "decrease", "hold"
+    public string Category { get; set; } = string.Empty; // "bluechip", "stablecoin", "altcoin", "defi"
+    public string Reason { get; set; } = string.Empty;
+    public decimal CurrentPct { get; set; }
+    public decimal TargetPct { get; set; }
+    public decimal DeltaPct { get; set; }
+    public List<string> SuggestedTokens { get; set; } = [];
+}
+
+// --- v4.0: Airdrop Eligibility ---
+
+public class AirdropEligibility
+{
+    public string Address { get; set; } = string.Empty;
+    public int TotalChecked { get; set; }
+    public int EligibleCount { get; set; }
+    public List<AirdropCheck> Checks { get; set; } = [];
+    public DateTime CheckedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class AirdropCheck
+{
+    public string Protocol { get; set; } = string.Empty;
+    public string Status { get; set; } = "ineligible"; // eligible, likely, possible, ineligible
+    public int CriteriaMet { get; set; }
+    public int TotalCriteria { get; set; }
+    public decimal EligibilityPct { get; set; }
+    public List<AirdropCriterion> Criteria { get; set; } = [];
+}
+
+public class AirdropCriterion
+{
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public bool Met { get; set; }
+    public string? Evidence { get; set; }
+}
+
+// --- v4.0: AI Analysis ---
+
+public class AiAnalysisResponse
+{
+    public string Address { get; set; } = string.Empty;
+    public string Question { get; set; } = string.Empty;
+    public string Analysis { get; set; } = string.Empty;
+    public List<string> KeyInsights { get; set; } = [];
+    public List<string> Recommendations { get; set; } = [];
+    public DateTime AnalyzedAt { get; set; } = DateTime.UtcNow;
+}
+
+// --- v4.0: WebSocket Streaming ---
+
+public class WalletUpdate
+{
+    public string Address { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty; // balance_change, new_transaction, risk_change, price_update
+    public string Description { get; set; } = string.Empty;
+    public object? Data { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+}
+
+public class StreamSubscription
+{
+    public string Address { get; set; } = string.Empty;
+    public string ConnectionId { get; set; } = string.Empty;
+    public DateTime SubscribedAt { get; set; } = DateTime.UtcNow;
+}
+
 // --- v3.1: P&L Tracking ---
 
 public class PnlSummary
