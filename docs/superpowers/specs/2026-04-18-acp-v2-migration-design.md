@@ -77,12 +77,10 @@ profiler-api/
         registry.ts                  # { [name]: { validate, execute, requirementSchema, description } }
         walletprofiler.ts
         quickcheck.ts
-        trustscore.ts
-        batchprofiler.ts
         multichain.ts
         walletcompare.ts
         tokenholders.ts
-        whalealerts.ts               # renamed from "whalemonitor" to match existing code
+        whalealerts.ts
         reputation.ts
         identity.ts
         gasspend.ts
@@ -134,19 +132,17 @@ const TIER_USDC = { free: 0, basic: 1, standard: 2, premium: 5 };
 const OFFERING_OVERRIDES: Record<string, number> = {
   quickcheck: 0.5,
   walletstatus: 0.5,
-  trustscore: 2,
   riskscore: 2,
   approvalaudit: 2,
   gasspend: 2,
   tokenscreen: 2,
   identity: 2,
   reputation: 2,
-  batchprofiler: 5,
   whalealerts: 10,
 };
 ```
 
-For offerings absent from `OFFERING_OVERRIDES` (walletprofiler, multichain, tokenholders, portfoliohistory, walletcompare, virtualsintel, pnl, lppositions, liquidationrisk, rebalance, airdrops, aianalyze, deepanalysis), price by `requirement.tier ?? "standard"` via `TIER_USDC`.
+For offerings absent from `OFFERING_OVERRIDES` (walletprofiler, multichain, tokenholders, portfoliohistory, walletcompare, virtualsintel, pnl, lppositions, liquidationrisk, rebalance, airdrops, aianalyze, deepanalysis), price by `requirement.tier ?? "standard"` via `TIER_USDC`. Batch requests (multiple addresses in one job via comma-separated input) ride the tier price of their parent offering; no separate batch SKU.
 
 All prices in one file; trivial to change.
 
@@ -280,13 +276,14 @@ V2 has no programmatic registration API. Procedure:
 - Verify: SSE connects, log shows `listOfferings` count = 22, a scripted fake `job.created` → `job.funded` cycle produces `setBudget` then `submit` calls (captured via a dev-only `--dry-run` flag that logs instead of calling `session.*`).
 
 **Live testnet (Base Sepolia)**
-- Register 5 offerings (walletprofiler, quickcheck, batchprofiler, multichain, approvalaudit) on Sepolia.
+- Register 5 offerings (walletprofiler, quickcheck, deepanalysis, multichain, approvalaudit) on Sepolia.
 - Using `TestBuyer` agent (`0x3Ad7936FCF587f29656F6a2D8942db547B4F91Da`), run end-to-end purchases:
-  - walletprofiler standard tier → inline deliverable.
-  - batchprofiler 50 wallets → URL deliverable (size > 50 KB).
-  - multichain → long-running, must finish inside SLA.
+  - walletprofiler standard tier with a single address → inline deliverable.
+  - walletprofiler with 50 comma-separated addresses → URL deliverable (size > 50 KB).
+  - deepanalysis across 7 chains → long-running, must finish inside SLA; tests URL deliverable path and tier pricing.
+  - multichain → long-running aggregation across chains.
   - quickcheck → fast path, $0.50 price correctly charged.
-  - approvalaudit → standard $2 price.
+  - approvalaudit → flat $2 price.
 
 ## Rollout sequence
 
