@@ -52,4 +52,28 @@ describe("loadEnv", () => {
       })
     ).toThrow(/ACP_CHAIN/);
   });
+
+  it("throws on whitespace-only required var", () => {
+    expect(() =>
+      loadEnv({
+        ACP_WALLET_ADDRESS: "   ",
+        ACP_WALLET_ID: "wid-1",
+        ACP_SIGNER_PRIVATE_KEY: "0xkey",
+        ACP_CHAIN: "base",
+        PROFILER_API_URL: "http://profiler-api:5000",
+      })
+    ).toThrow(/ACP_WALLET_ADDRESS/);
+  });
+
+  it("maps whitespace-only ACP_BUILDER_CODE to undefined", () => {
+    const env = loadEnv({
+      ACP_WALLET_ADDRESS: "0xabc",
+      ACP_WALLET_ID: "wid-1",
+      ACP_SIGNER_PRIVATE_KEY: "0xkey",
+      ACP_CHAIN: "base",
+      PROFILER_API_URL: "http://profiler-api:5000",
+      ACP_BUILDER_CODE: "  ",
+    });
+    expect(env.builderCode).toBeUndefined();
+  });
 });

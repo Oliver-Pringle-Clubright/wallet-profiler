@@ -19,7 +19,8 @@ const REQUIRED = [
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AcpEnv {
   for (const name of REQUIRED) {
-    if (!source[name] || source[name] === "") {
+    const value = source[name];
+    if (!value || value.trim() === "") {
       throw new Error(`Missing required env var: ${name}`);
     }
   }
@@ -29,12 +30,16 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AcpEnv {
     throw new Error(`ACP_CHAIN must be "base" or "baseSepolia", got "${chain}"`);
   }
 
+  const builderCodeRaw = source.ACP_BUILDER_CODE;
+  const builderCode =
+    builderCodeRaw && builderCodeRaw.trim() !== "" ? builderCodeRaw : undefined;
+
   return {
     walletAddress: source.ACP_WALLET_ADDRESS!,
     walletId: source.ACP_WALLET_ID!,
     signerPrivateKey: source.ACP_SIGNER_PRIVATE_KEY!,
     chain,
     profilerApiUrl: source.PROFILER_API_URL!,
-    builderCode: source.ACP_BUILDER_CODE || undefined,
+    builderCode,
   };
 }
