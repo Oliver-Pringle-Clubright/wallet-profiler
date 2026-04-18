@@ -8,11 +8,17 @@ describe("pricing tables", () => {
     expect(TIER_USDC.standard).toBe(2);
     expect(TIER_USDC.premium).toBe(5);
   });
-  it("whalealerts override is $10", () => {
-    expect(OFFERING_OVERRIDES.whalealerts).toBe(10);
+  it("whalealerts override is $1", () => {
+    expect(OFFERING_OVERRIDES.whalealerts).toBe(1);
   });
   it("quickcheck override is $0.50", () => {
     expect(OFFERING_OVERRIDES.quickcheck).toBe(0.5);
+  });
+  it("virtualsintel override is $1", () => {
+    expect(OFFERING_OVERRIDES.virtualsintel).toBe(1);
+  });
+  it("walletprofiler now has override $0.50 (flat pricing)", () => {
+    expect(OFFERING_OVERRIDES.walletprofiler).toBe(0.5);
   });
 });
 
@@ -31,14 +37,14 @@ describe("tierUsdc", () => {
 describe("priceFor", () => {
   it("override offering ignores tier", () => {
     expect(priceFor("quickcheck", { tier: "premium" }).amount).toBe(0.5);
-    expect(priceFor("whalealerts", {}).amount).toBe(10);
+    expect(priceFor("whalealerts", {}).amount).toBe(1);
   });
-  it("tier-driven offering uses tier when override missing", () => {
-    expect(priceFor("walletprofiler", { tier: "basic" }).amount).toBe(1);
-    expect(priceFor("walletprofiler", { tier: "premium" }).amount).toBe(5);
-    expect(priceFor("walletprofiler", {}).amount).toBe(2);
+  it("walletprofiler is flat $0.50 regardless of tier", () => {
+    expect(priceFor("walletprofiler", { tier: "basic" }).amount).toBe(0.5);
+    expect(priceFor("walletprofiler", { tier: "premium" }).amount).toBe(0.5);
+    expect(priceFor("walletprofiler", {}).amount).toBe(0.5);
   });
-  it("unknown offering falls through to standard", () => {
+  it("unknown offering falls through to tier default (standard)", () => {
     expect(priceFor("notARealOffering", {}).amount).toBe(2);
   });
   it("returns USDC symbol", () => {
