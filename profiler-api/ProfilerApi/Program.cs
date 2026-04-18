@@ -59,6 +59,7 @@ builder.Services.AddSingleton<LpPositionService>();
 builder.Services.AddSingleton<LiquidationRiskService>();
 builder.Services.AddSingleton<RebalancingService>();
 builder.Services.AddSingleton<AirdropEligibilityService>();
+builder.Services.AddSingleton<DeliverableStore>();
 builder.Services.AddScoped<ProfileOrchestrator>();
 builder.Services.AddSingleton<MonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorService>());
@@ -1268,6 +1269,32 @@ app.MapGet("/tiers", () => Results.Ok(new
     }
 }));
 
+// --- ACP v2 deliverables (large payloads stored in Redis with 1h TTL) ---
+app.MapPost("/deliverables", async (
+    DeliverableStoreRequest body,
+    DeliverableStore store,
+    IConfiguration config) =>
+{
+    if (body is null || body.Payload is null)
+        return Results.BadRequest(new { error = "payload is required" });
+
+    var id = await store.StoreAsync(body.Payload);
+    var baseUrl = config["AppSettings:PublicBaseUrl"] ?? "http://localhost:5000";
+    var url = $"{baseUrl.TrimEnd('/')}/deliverables/{id}";
+    return Results.Ok(new { id, url });
+});
+
+app.MapGet("/deliverables/{id}", async (
+    string id,
+    DeliverableStore store,
+    HttpContext http) =>
+{
+    var json = await store.FetchAsync(id);
+    if (json is null) return Results.NotFound();
+    http.Response.ContentType = "application/json";
+    return Results.Content(json, "application/json");
+});
+
 // --- GET /rebalance/{address} (v4.0) ---
 app.MapGet("/rebalance/{address}", async (
     string address,
@@ -1414,3 +1441,6 @@ internal class GasTxDto
     [JsonPropertyName("gasPrice")] public string? GasPrice { get; set; }
     [JsonPropertyName("timeStamp")] public string? TimeStamp { get; set; }
 }
+
+// --- ACP v2 deliverable request body ---
+public record DeliverableStoreRequest(string? JobId, object? Payload);
