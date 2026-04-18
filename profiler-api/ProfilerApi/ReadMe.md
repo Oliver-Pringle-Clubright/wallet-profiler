@@ -1,4 +1,4 @@
-Wallet Profiler v3.0
+﻿Wallet Profiler v3.0
 ====================
 AGDP Service Agent for On-Chain Wallet Analysis
 

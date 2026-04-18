@@ -27,6 +27,9 @@ public class WalletProfile
     public SanctionsCheck? Sanctions { get; set; }
     public SmartMoneySignal? SmartMoney { get; set; }
     public MevExposure? MevExposure { get; set; }
+    public PnlSummary? Pnl { get; set; }
+    public List<LpPosition> LpPositions { get; set; } = [];
+    public LiquidationRisk? LiquidationRisk { get; set; }
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -579,4 +582,150 @@ public class MultiChainProfile
     public Dictionary<string, WalletProfile> ChainProfiles { get; set; } = new();
     public List<string> ActiveChains { get; set; } = [];
     public DateTime ProfiledAt { get; set; } = DateTime.UtcNow;
+}
+
+// --- v4.0: Rebalancing Suggestions ---
+
+public class RebalanceSuggestion
+{
+    public string ModelPortfolio { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public int FitScore { get; set; } // 0-100 how well current portfolio matches
+    public decimal BluechipPct { get; set; }
+    public decimal StablecoinPct { get; set; }
+    public decimal AltcoinPct { get; set; }
+    public List<RebalanceAction> Actions { get; set; } = [];
+    public DateTime CalculatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class RebalanceAction
+{
+    public string Action { get; set; } = string.Empty; // "increase", "decrease", "hold"
+    public string Category { get; set; } = string.Empty; // "bluechip", "stablecoin", "altcoin", "defi"
+    public string Reason { get; set; } = string.Empty;
+    public decimal CurrentPct { get; set; }
+    public decimal TargetPct { get; set; }
+    public decimal DeltaPct { get; set; }
+    public List<string> SuggestedTokens { get; set; } = [];
+}
+
+// --- v4.0: Airdrop Eligibility ---
+
+public class AirdropEligibility
+{
+    public string Address { get; set; } = string.Empty;
+    public int TotalChecked { get; set; }
+    public int EligibleCount { get; set; }
+    public List<AirdropCheck> Checks { get; set; } = [];
+    public DateTime CheckedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class AirdropCheck
+{
+    public string Protocol { get; set; } = string.Empty;
+    public string Status { get; set; } = "ineligible"; // eligible, likely, possible, ineligible
+    public int CriteriaMet { get; set; }
+    public int TotalCriteria { get; set; }
+    public decimal EligibilityPct { get; set; }
+    public List<AirdropCriterion> Criteria { get; set; } = [];
+}
+
+public class AirdropCriterion
+{
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public bool Met { get; set; }
+    public string? Evidence { get; set; }
+}
+
+// --- v4.0: AI Analysis ---
+
+public class AiAnalysisResponse
+{
+    public string Address { get; set; } = string.Empty;
+    public string Question { get; set; } = string.Empty;
+    public string Analysis { get; set; } = string.Empty;
+    public List<string> KeyInsights { get; set; } = [];
+    public List<string> Recommendations { get; set; } = [];
+    public DateTime AnalyzedAt { get; set; } = DateTime.UtcNow;
+}
+
+// --- v4.0: WebSocket Streaming ---
+
+public class WalletUpdate
+{
+    public string Address { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty; // balance_change, new_transaction, risk_change, price_update
+    public string Description { get; set; } = string.Empty;
+    public object? Data { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+}
+
+public class StreamSubscription
+{
+    public string Address { get; set; } = string.Empty;
+    public string ConnectionId { get; set; } = string.Empty;
+    public DateTime SubscribedAt { get; set; } = DateTime.UtcNow;
+}
+
+// --- v3.1: P&L Tracking ---
+
+public class PnlSummary
+{
+    public decimal? TotalRealizedPnlUsd { get; set; }
+    public decimal? TotalUnrealizedPnlUsd { get; set; }
+    public decimal? TotalPnlUsd { get; set; }
+    public decimal? TotalPnlPct { get; set; }
+    public int TokensAnalyzed { get; set; }
+    public int ProfitableTokens { get; set; }
+    public int LosingTokens { get; set; }
+    public List<TokenPnl> TopGainers { get; set; } = [];
+    public List<TokenPnl> TopLosers { get; set; } = [];
+    public List<TokenPnl> AllTokenPnl { get; set; } = [];
+    public DateTime CalculatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class TokenPnl
+{
+    public string TokenSymbol { get; set; } = string.Empty;
+    public string TokenAddress { get; set; } = string.Empty;
+    public decimal TotalBought { get; set; }
+    public decimal TotalSold { get; set; }
+    public decimal? CostBasisUsd { get; set; }
+    public decimal? RealizedPnlUsd { get; set; }
+    public decimal? UnrealizedPnlUsd { get; set; }
+    public decimal? CurrentHolding { get; set; }
+    public decimal? CurrentValueUsd { get; set; }
+    public decimal? PnlPct { get; set; }
+}
+
+// --- v3.1: Uniswap V3 LP Positions ---
+
+public class LpPosition
+{
+    public string Protocol { get; set; } = "Uniswap V3";
+    public int TokenId { get; set; }
+    public string Token0Symbol { get; set; } = string.Empty;
+    public string Token1Symbol { get; set; } = string.Empty;
+    public string Token0Address { get; set; } = string.Empty;
+    public string Token1Address { get; set; } = string.Empty;
+    public int FeeTier { get; set; }
+    public decimal Liquidity { get; set; }
+    public decimal? TokensOwed0 { get; set; }
+    public decimal? TokensOwed1 { get; set; }
+    public bool InRange { get; set; }
+    public string Status { get; set; } = "active"; // active, closed, out-of-range
+}
+
+// --- v3.1: Liquidation Risk ---
+
+public class LiquidationRisk
+{
+    public decimal? AaveHealthFactor { get; set; }
+    public string AaveRiskLevel { get; set; } = "none"; // none, safe, watch, warning, danger
+    public decimal? AaveCollateralUsd { get; set; }
+    public decimal? AaveDebtUsd { get; set; }
+    public decimal? CompoundBorrowBalance { get; set; }
+    public string OverallRisk { get; set; } = "none"; // none, safe, watch, warning, danger
+    public List<string> Alerts { get; set; } = [];
 }

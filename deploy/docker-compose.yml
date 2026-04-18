@@ -11,6 +11,12 @@ services:
       - Etherscan__ApiKey=${ETHERSCAN_API_KEY}
       - Basescan__ApiKey=${BASESCAN_API_KEY:-}
       - Arbiscan__ApiKey=${ARBISCAN_API_KEY:-}
+      - Anthropic__ApiKey=${ANTHROPIC_API_KEY:-}
+      - Redis__ConnectionString=${REDIS_CONNECTION:-redis:6379}
+      - AppSettings__PublicBaseUrl=${PUBLIC_BASE_URL:-http://localhost:5000}
+    depends_on:
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "dotnet --info > /dev/null 2>&1 || exit 1"]
       interval: 5s
@@ -19,17 +25,28 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  acp-runtime:
+  acp-v2:
     build:
-      context: ../../
-      dockerfile: wallet-profiler/deploy/Dockerfile.acp-runtime
+      context: ../profiler-api/acp-v2
+      dockerfile: Dockerfile
     depends_on:
       profiler-api:
         condition: service_healthy
     env_file: .env
     environment:
       - PROFILER_API_URL=http://profiler-api:5000
-      - LITE_AGENT_API_KEY=${LITE_AGENT_API_KEY}
-    volumes:
-      - ./acp-config.json:/app/config.json:ro
+      - ACP_CHAIN=${ACP_CHAIN:-baseSepolia}
+      - ACP_WALLET_ADDRESS=${ACP_WALLET_ADDRESS}
+      - ACP_WALLET_ID=${ACP_WALLET_ID}
+      - ACP_SIGNER_PRIVATE_KEY=${ACP_SIGNER_PRIVATE_KEY}
+      - ACP_BUILDER_CODE=${ACP_BUILDER_CODE:-}
     restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

@@ -28,6 +28,9 @@ public class ProfileOrchestrator
     private readonly SmartMoneyService _smartMoneyService;
     private readonly MevDetectionService _mevService;
     private readonly SnapshotService _snapshotService;
+    private readonly PnlService _pnlService;
+    private readonly LpPositionService _lpPositionService;
+    private readonly LiquidationRiskService _liquidationService;
     private readonly ProfileCacheService _cacheService;
     private readonly ILogger<ProfileOrchestrator> _logger;
 
@@ -52,6 +55,9 @@ public class ProfileOrchestrator
         SmartMoneyService smartMoneyService,
         MevDetectionService mevService,
         SnapshotService snapshotService,
+        PnlService pnlService,
+        LpPositionService lpPositionService,
+        LiquidationRiskService liquidationService,
         ProfileCacheService cacheService,
         ILogger<ProfileOrchestrator> logger)
     {
@@ -75,6 +81,9 @@ public class ProfileOrchestrator
         _smartMoneyService = smartMoneyService;
         _mevService = mevService;
         _snapshotService = snapshotService;
+        _pnlService = pnlService;
+        _lpPositionService = lpPositionService;
+        _liquidationService = liquidationService;
         _cacheService = cacheService;
         _logger = logger;
     }
@@ -250,8 +259,10 @@ public class ProfileOrchestrator
             var clusteringTask = _clusteringService.FindSimilarAsync(
                 address, chain, tier, tokens, profile.TopInteractions, topCounterparties);
             var mevTask = _mevService.AnalyzeAsync(address, chain);
+            var lpTask = _lpPositionService.GetPositionsAsync(web3, address, chain);
+            var liquidationTask = _liquidationService.AnalyzeAsync(web3, address, chain);
 
-            await Task.WhenAll(approvalTask, nftTask, transferTask, clusteringTask, mevTask);
+            await Task.WhenAll(approvalTask, nftTask, transferTask, clusteringTask, mevTask, lpTask, liquidationTask);
 
             // --- Assign parallel results ---
             profile.ApprovalRisk = approvalTask.Result;
@@ -259,6 +270,16 @@ public class ProfileOrchestrator
             profile.TransferHistory = transferTask.Result;
             profile.SimilarWallets = clusteringTask.Result;
             profile.MevExposure = mevTask.Result;
+            profile.LpPositions = lpTask.Result;
+            profile.LiquidationRisk = liquidationTask.Result;
+
+            // --- Detect Pendle positions from token list (no RPC calls) ---
+            var pendlePositions = _defiService.DetectPendlePositions(tokens);
+            if (pendlePositions.Count > 0)
+                profile.DeFiPositions.AddRange(pendlePositions);
+
+            // --- P&L calculation (depends on transfer history) ---
+            profile.Pnl = _pnlService.Calculate(profile.TransferHistory, tokens, tokenPrices);
 
             // --- Sync features that depend on async results ---
             profile.AcpTrust = _trustService.Evaluate(profile);

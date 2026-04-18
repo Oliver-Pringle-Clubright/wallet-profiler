@@ -1,6 +1,9 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using ProfilerApi.Data;
+using ProfilerApi.Hubs;
 using ProfilerApi.Models;
 using ProfilerApi.Services;
 
@@ -10,6 +13,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 1_048_576);
 
 builder.Services.AddMemoryCache();
+
+// PostgreSQL (optional — falls back to in-memory if not configured)
+var pgConnection = builder.Configuration.GetConnectionString("ProfilerDb");
+if (!string.IsNullOrEmpty(pgConnection))
+{
+    builder.Services.AddDbContext<ProfilerDbContext>(options =>
+        options.UseNpgsql(pgConnection));
+}
 
 // Redis distributed cache (optional — falls back to memory if not configured)
 var redisConnection = builder.Configuration["Redis:ConnectionString"];
@@ -43,9 +54,17 @@ builder.Services.AddSingleton<ReputationBadgeService>();
 builder.Services.AddSingleton<SocialIdentityService>();
 builder.Services.AddSingleton<ReferralService>();
 builder.Services.AddSingleton<WalletComparisonService>();
+builder.Services.AddSingleton<PnlService>();
+builder.Services.AddSingleton<LpPositionService>();
+builder.Services.AddSingleton<LiquidationRiskService>();
+builder.Services.AddSingleton<RebalancingService>();
+builder.Services.AddSingleton<AirdropEligibilityService>();
+builder.Services.AddSingleton<DeliverableStore>();
 builder.Services.AddScoped<ProfileOrchestrator>();
 builder.Services.AddSingleton<MonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorService>());
+builder.Services.AddSingleton<WalletStreamingService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<WalletStreamingService>());
 builder.Services.AddHttpClient<TokenService>(c => c.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddHttpClient<ActivityService>(c => c.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddHttpClient<PriceService>(c => c.Timeout = TimeSpan.FromSeconds(15));
@@ -56,6 +75,14 @@ builder.Services.AddHttpClient<MevDetectionService>(c => c.Timeout = TimeSpan.Fr
 builder.Services.AddHttpClient<WhaleAlertService>(c => c.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddHttpClient<SolanaService>(c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient<VirtualsIntelService>(c => c.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient<AiAnalystService>(c => c.Timeout = TimeSpan.FromSeconds(60));
+
+// SignalR for real-time WebSocket streaming
+builder.Services.AddSignalR();
+
+// Blazor Server for dashboard UI
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
 
 // CORS — restrict to known origins (configurable via AllowedOrigins in appsettings)
 var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
@@ -66,13 +93,32 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
-              .WithMethods("GET", "POST", "DELETE");
+              .WithMethods("GET", "POST", "DELETE")
+              .AllowCredentials();
     });
 });
 
 var app = builder.Build();
 
+// Auto-migrate PostgreSQL if configured
+if (!string.IsNullOrEmpty(pgConnection))
+{
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ProfilerDbContext>();
+        db.Database.EnsureCreated();
+        app.Logger.LogInformation("PostgreSQL database initialized");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "PostgreSQL not available — falling back to in-memory storage");
+    }
+}
+
 app.UseCors();
+app.UseStaticFiles();
+app.UseAntiforgery();
 
 // --- Validation helpers ---
 static bool IsValidEvmAddress(string addr) =>
@@ -103,8 +149,10 @@ app.Use(async (context, next) =>
 {
     var path = (context.Request.Path.Value ?? "").TrimEnd('/').ToLowerInvariant();
 
-    // Skip auth for health, tiers, and SLA endpoints
-    if (path is "/health" or "/tiers" or "/sla")
+    // Skip auth for health, tiers, SLA, dashboard, and SignalR endpoints
+    if (path is "/health" or "/tiers" or "/sla" ||
+        path.StartsWith("/dashboard") || path.StartsWith("/css") || path.StartsWith("/_framework") ||
+        path.StartsWith("/_blazor") || path.StartsWith("/ws/"))
     {
         await next();
         return;
@@ -1059,6 +1107,125 @@ app.MapGet("/gas/{address}", async (
     }
 });
 
+// --- GET /pnl/{address} (v3.1) ---
+app.MapGet("/pnl/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("pnl");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        // Build standard profile (includes P&L calculation)
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "standard");
+        return Results.Ok(new
+        {
+            address,
+            chain,
+            pnl = profile.Pnl,
+            totalValueUsd = profile.TotalValueUsd,
+            profiledAt = profile.ProfiledAt
+        });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
+    }
+});
+
+// --- GET /lp-positions/{address} (v3.1) ---
+app.MapGet("/lp-positions/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("lp_positions");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "standard");
+        return Results.Ok(new
+        {
+            address,
+            chain,
+            lpPositions = profile.LpPositions,
+            totalPositions = profile.LpPositions.Count,
+            activePositions = profile.LpPositions.Count(p => p.Status == "active"),
+            profiledAt = profile.ProfiledAt
+        });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
+    }
+});
+
+// --- GET /liquidation-risk/{address} (v3.1) ---
+app.MapGet("/liquidation-risk/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("liquidation_risk");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "standard");
+        return Results.Ok(new
+        {
+            address,
+            chain,
+            liquidationRisk = profile.LiquidationRisk,
+            defiPositions = profile.DeFiPositions,
+            profiledAt = profile.ProfiledAt
+        });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
+    }
+});
+
 // --- GET /sla (v1.5) ---
 app.MapGet("/sla", (SlaTrackingService sla, ProfileCacheService cache) =>
 {
@@ -1093,7 +1260,7 @@ app.MapGet("/tiers", () => Results.Ok(new
     standard = new
     {
         fee = "0.001 ETH",
-        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (Aave, Compound)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support", "Token transfer history timeline", "Similar wallet clustering", "Revoke recommendation engine", "OFAC sanctions screening", "Smart money analysis", "Portfolio snapshots & history", "MEV exposure detection" }
+        includes = new[] { "Everything in Basic", "ERC-20 tokens (up to 30)", "USD prices for all tokens", "Total portfolio value", "DeFi positions (12 protocols)", "Transaction activity history", "Portfolio quality score", "ACP trust score", "Token approval risk scan", "Contract interaction labels", "NFT holdings & floor prices", "Cross-chain support", "Token transfer history timeline", "Similar wallet clustering", "Revoke recommendation engine", "OFAC sanctions screening", "Smart money analysis", "Portfolio snapshots & history", "MEV exposure detection", "P&L tracking (FIFO)", "Uniswap V3 LP positions", "Liquidation risk monitoring", "Portfolio rebalancing suggestions", "Airdrop eligibility checker", "AI wallet analyst", "Real-time WebSocket streaming", "Live Blazor dashboard" }
     },
     premium = new
     {
@@ -1101,6 +1268,166 @@ app.MapGet("/tiers", () => Results.Ok(new
         includes = new[] { "Everything in Standard", "ERC-20 tokens (up to 50)", "Natural language summary", "Priority caching" }
     }
 }));
+
+// --- ACP v2 deliverables (large payloads stored in Redis with 1h TTL) ---
+app.MapPost("/deliverables", async (
+    DeliverableStoreRequest body,
+    DeliverableStore store,
+    IConfiguration config) =>
+{
+    if (body is null || body.Payload is null)
+        return Results.BadRequest(new { error = "payload is required" });
+
+    var id = await store.StoreAsync(body.Payload);
+    var baseUrl = config["AppSettings:PublicBaseUrl"] ?? "http://localhost:5000";
+    var url = $"{baseUrl.TrimEnd('/')}/deliverables/{id}";
+    return Results.Ok(new { id, url });
+});
+
+app.MapGet("/deliverables/{id}", async (
+    string id,
+    DeliverableStore store,
+    HttpContext http) =>
+{
+    var json = await store.FetchAsync(id);
+    if (json is null) return Results.NotFound();
+    http.Response.ContentType = "application/json";
+    return Results.Content(json, "application/json");
+});
+
+// --- GET /rebalance/{address} (v4.0) ---
+app.MapGet("/rebalance/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    RebalancingService rebalancing,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("rebalance");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    var portfolio = httpContext.Request.Query["portfolio"].FirstOrDefault();
+    address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "standard");
+        var suggestions = rebalancing.Analyze(profile, portfolio);
+
+        return Results.Ok(new
+        {
+            address,
+            chain,
+            suggestions,
+            totalValueUsd = profile.TotalValueUsd,
+            profiledAt = profile.ProfiledAt
+        });
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
+    }
+});
+
+// --- GET /airdrops/{address} (v4.0) ---
+app.MapGet("/airdrops/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    AirdropEligibilityService airdropService,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("airdrops");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    address = address.Trim();
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "standard");
+        var eligibility = airdropService.Check(profile);
+
+        return Results.Ok(eligibility);
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "Request failed. Check address and parameters." });
+    }
+});
+
+// --- GET /ai-analyze/{address} (v4.0) ---
+app.MapGet("/ai-analyze/{address}", async (
+    string address,
+    ProfileOrchestrator orchestrator,
+    AiAnalystService aiService,
+    SlaTrackingService sla,
+    HttpContext httpContext) =>
+{
+    using var tracker = sla.Track("ai_analyze");
+    var chain = (httpContext.Request.Query["chain"].FirstOrDefault() ?? "ethereum").ToLowerInvariant();
+    var question = httpContext.Request.Query["question"].FirstOrDefault() ?? "Give me a comprehensive analysis of this wallet";
+    address = address.Trim();
+
+    if (!aiService.IsConfigured)
+        return Results.BadRequest(new { error = "AI analysis is not configured. Set Anthropic:ApiKey in appsettings." });
+
+    if (!validChains.Contains(chain))
+        return Results.BadRequest(new { error = $"Unsupported chain. Valid: {string.Join(", ", ChainConfig.AllChains)}" });
+
+    if (address.Length > 255 || (!IsValidEvmAddress(address) && !address.EndsWith(".eth")))
+        return Results.BadRequest(new { error = "Invalid address format" });
+
+    try
+    {
+        if (address.EndsWith(".eth"))
+            address = await orchestrator.ResolveAddressAsync(address, chain);
+
+        var profile = await orchestrator.BuildProfileAsync(address, chain, "standard");
+        var analysis = await aiService.AnalyzeAsync(profile, question);
+
+        return Results.Ok(analysis);
+    }
+    catch (Exception ex)
+    {
+        tracker.MarkFailed();
+        return Results.BadRequest(new { error = "AI analysis failed. " + ex.Message });
+    }
+});
+
+// --- GET /ws/status (v4.0: WebSocket streaming status) ---
+app.MapGet("/ws/status", (WalletStreamingService streamingService) =>
+{
+    return Results.Ok(new
+    {
+        activeSubscriptions = streamingService.ActiveSubscriptions,
+        trackedAddresses = streamingService.TrackedAddresses
+    });
+});
+
+// --- SignalR hub for real-time wallet streaming ---
+app.MapHub<WalletHub>("/ws/wallet");
+
+// --- Blazor Server dashboard ---
+app.MapRazorComponents<ProfilerApi.Components.App>()
+    .AddInteractiveServerRenderMode();
 
 app.Run();
 
@@ -1114,3 +1441,6 @@ internal class GasTxDto
     [JsonPropertyName("gasPrice")] public string? GasPrice { get; set; }
     [JsonPropertyName("timeStamp")] public string? TimeStamp { get; set; }
 }
+
+// --- ACP v2 deliverable request body ---
+public record DeliverableStoreRequest(string? JobId, object? Payload);
